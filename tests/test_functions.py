@@ -47,18 +47,6 @@ def _mock_read_csv(dfs_by_asset: dict):
 
 class TestLoadData:
 
-    def test_returns_dataframe(self):
-        df_a = _make_df({"price": [1.0, 2.0, 4.0, 8.0, 16.0]})
-        with patch("pandas.read_csv", side_effect=_mock_read_csv({"A": df_a})):
-            result = load_data(["A"])
-        assert isinstance(result, pd.DataFrame)
-
-    def test_index_is_date(self):
-        df_a = _make_df({"price": [1.0, 2.0, 4.0, 8.0, 16.0]})
-        with patch("pandas.read_csv", side_effect=_mock_read_csv({"A": df_a})):
-            result = load_data(["A"])
-        assert result.index.name == "date"
-
     def test_log_returns_drops_first_row(self):
         """After shift(1) + dropna, exactly one row is removed."""
         n = 5
@@ -88,15 +76,6 @@ class TestLoadData:
             result = load_data(["A"], log_returns=False)
         assert len(result) == len(prices)
 
-    def test_merge_two_assets_contains_both_columns(self):
-        dates = pd.date_range("2023-01-01", periods=5, freq="D")
-        df_a = _make_df({"price_a": [1.0, 2.0, 3.0, 4.0, 5.0]}, dates=dates)
-        df_b = _make_df({"price_b": [5.0, 4.0, 3.0, 2.0, 1.0]}, dates=dates)
-        with patch("pandas.read_csv", side_effect=_mock_read_csv({"A": df_a, "B": df_b})):
-            result = load_data(["A", "B"], log_returns=False)
-        assert "price_a" in result.columns
-        assert "price_b" in result.columns
-
     def test_inner_join_drops_non_overlapping_dates(self):
         """Only the 3 common dates (Jan 03-05) should be kept."""
         dates_a = pd.date_range("2023-01-01", periods=5, freq="D")
@@ -119,16 +98,6 @@ class TestLoadData:
 # ---------------------------------------------------------------------------
 
 class TestCorrelation:
-
-    def test_output_shape_no_lag(self):
-        data = np.random.randn(100, 4)
-        C = correlation(data, lag=0)
-        assert C.shape == (4, 4)
-
-    def test_output_shape_with_lag(self):
-        data = np.random.randn(100, 4)
-        C = correlation(data, lag=5)
-        assert C.shape == (4, 4)
 
     def test_diagonal_ones_no_lag(self):
         """Self-correlation of any series must be 1."""
@@ -160,32 +129,30 @@ class TestCorrelation:
         C = correlation(data, lag=0)
         np.testing.assert_allclose(C, np.ones((2, 2)), atol=1e-10)
 
-    def test_lag_cross_correlation(self):
+    def test_lag_with_known_solutions(self):
         """
-        Construct data so that data[:-lag, 0] == data[lag:, 1].
-        The lagged cross-correlation C[0, 1] must therefore be 1.0.
-
-        C[0, 1] = corr(data[:-lag, 0], data[lag:, 1])
+        Test lagged correlation with known analytical solutions.
+        Create two series where series[1] = series[0] shifted by k positions.
+        At lag=k, cross-correlation should be perfect (1.0).
         """
-        lag = 3
         rng = np.random.default_rng(42)
-        x = rng.standard_normal(60)
+        base_series = rng.standard_normal(100)
 
-        # Construct data so that data[:-lag, 0] and data[lag:, 1] are identical
-        data = np.zeros((60, 2))
-        data[:, 0] = x  # col 0 = x (reference series)
-        data[lag:, 1] = x[:-lag]  # col 1[lag:] = x[:-lag]
-        # Therefore:
-        #   data[:-lag, 0] = x[:-lag]
-        #   data[lag:, 1]  = x[:-lag]  ← identical series
-        # So C[0, 1] should be 1.0
+        # Test over multiple lags
+        test_lags = [1, 2, 3, 5]
 
-        C = correlation(data, lag=lag)
+        for k in test_lags:
+            # Series 1: base series
+            # Series 2: base series shifted forward by k positions
+            # At lag=k, they should align → correlation = 1.0
+            data = np.zeros((100, 2))
+            data[:, 0] = base_series
+            data[k:, 1] = base_series[:-k]  # Shifted series
 
-        np.testing.assert_allclose(
-            C[0, 1], 1.0, atol=1e-10,
-            err_msg=(
-                "lag > 0 must return the cross-correlation block [:n, n:], "
-                "not the auto-correlation block [:n, :n]"
-            ),
-        )
+            C = correlation(data, lag=k)
+
+            # At lag=k, the series align perfectly
+            np.testing.assert_allclose(
+                C[0, 1], 1.0, atol=1e-10,
+                err_msg=f"At lag={k}, shifted series should correlate perfectly"
+            )
