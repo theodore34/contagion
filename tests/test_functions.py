@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from functions import load_data, correlation
+from functions import load_data, correlation, corr_threshold
 
 
 # ---------------------------------------------------------------------------
@@ -156,3 +156,93 @@ class TestCorrelation:
                 C[0, 1], 1.0, atol=1e-10,
                 err_msg=f"At lag={k}, shifted series should correlate perfectly"
             )
+
+
+# ---------------------------------------------------------------------------
+# corr_threshold
+# ---------------------------------------------------------------------------
+
+class TestCorrThreshold:
+
+    @pytest.fixture()
+    def symmetric_corr(self):
+        """A 4x4 symmetric correlation matrix with known values."""
+        return np.array([
+            [1.0, 0.9, 0.3, 0.1],
+            [0.9, 1.0, 0.5, 0.2],
+            [0.3, 0.5, 1.0, 0.7],
+            [0.1, 0.2, 0.7, 1.0],
+        ])
+
+    def test_output_is_symmetric(self, symmetric_corr):
+        result = corr_threshold(symmetric_corr, 0.5)
+        np.testing.assert_allclose(result, result.T, atol=1e-12)
+
+    def test_diagonal_preserved_moderate_quantile(self, symmetric_corr):
+        """At moderate quantile, diagonal (1.0) stays since threshold < 1."""
+        result = corr_threshold(symmetric_corr, 0.5)
+        np.testing.assert_allclose(np.diag(result), 1.0, atol=1e-12)
+
+    def test_quantile_zero_zeros_minimum(self, symmetric_corr):
+        """quantile=0 → threshold = min(|values|), so the smallest value gets zeroed."""
+        result = corr_threshold(symmetric_corr, 0.0)
+        # threshold = min abs = 0.1, values with |v| <= 0.1 are zeroed
+        assert result[0, 3] == 0.0
+        assert result[3, 0] == 0.0
+        # larger values survive
+        assert result[0, 1] == pytest.approx(0.9)
+
+    def test_values_not_doubled(self, symmetric_corr):
+        """Regression: old code doubled off-diagonal values."""
+        result = corr_threshold(symmetric_corr, 0.0)
+        assert np.all(np.abs(result) <= 1.0 + 1e-12)
+
+    def test_known_example(self):
+        """Hand-computed: threshold zeros out |v| <= thres."""
+        corr = np.array([
+            [1.0, 0.8, 0.2],
+            [0.8, 1.0, 0.5],
+            [0.2, 0.5, 1.0],
+        ])
+        # Lower triangle values (diag=True): [1.0, 0.8, 1.0, 0.2, 0.5, 1.0]
+        # abs sorted: [0.2, 0.5, 0.8, 1.0, 1.0, 1.0]
+        # quantile=0.5 → threshold = median of abs values
+        thres = np.quantile([0.2, 0.5, 0.8, 1.0, 1.0, 1.0], 0.5)
+        expected = corr.copy()
+        expected[np.abs(expected) <= thres] = 0
+        result = corr_threshold(corr, 0.5, diag=True)
+        np.testing.assert_allclose(result, expected, atol=1e-12)
+
+    def test_high_quantile_zeros_most(self, symmetric_corr):
+        """A very high quantile should zero out most off-diagonal entries."""
+        result = corr_threshold(symmetric_corr, 0.95)
+        off_diag_nonzero = np.count_nonzero(result - np.diag(np.diag(result)))
+        total_off_diag = symmetric_corr.size - symmetric_corr.shape[0]
+        assert off_diag_nonzero < total_off_diag
+
+    def test_diag_false_uses_full_matrix(self):
+        """With diag=False, quantile is computed over all entries."""
+        corr = np.array([
+            [1.0, 0.6],
+            [0.6, 1.0],
+        ])
+        # diag=True:  lower tri values = [1.0, 0.6, 1.0], abs = [0.6, 1.0, 1.0]
+        # diag=False: all values = [1.0, 0.6, 0.6, 1.0], abs = [0.6, 0.6, 1.0, 1.0]
+        # At quantile=0.5, thresholds differ
+        r_diag = corr_threshold(corr, 0.5, diag=True)
+        r_full = corr_threshold(corr, 0.5, diag=False)
+        # Both should be symmetric
+        np.testing.assert_allclose(r_diag, r_diag.T, atol=1e-12)
+        np.testing.assert_allclose(r_full, r_full.T, atol=1e-12)
+
+    def test_zeros_stay_symmetric(self, symmetric_corr):
+        """If (i,j) is zeroed, (j,i) must also be zero."""
+        result = corr_threshold(symmetric_corr, 0.7)
+        zero_mask = result == 0
+        np.testing.assert_array_equal(zero_mask, zero_mask.T)
+
+    def test_no_mutation_of_input(self, symmetric_corr):
+        """Input matrix must not be modified in place."""
+        original = symmetric_corr.copy()
+        corr_threshold(symmetric_corr, 0.5)
+        np.testing.assert_array_equal(symmetric_corr, original)

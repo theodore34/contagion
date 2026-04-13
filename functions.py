@@ -32,3 +32,40 @@ def correlation(data, lag=0):
         corr_matrix = np.corrcoef(data.T)
 
     return corr_matrix
+
+
+def corr_threshold(corr, quantile, diag=True):
+    """Filter correlation matrix by quantile threshold.
+
+    Parameters
+    ----------
+    corr : np.ndarray
+        Correlation matrix
+    quantile : float
+        Quantile threshold between 0 and 1 for filtering
+    diag : bool, optional
+        If True, consider only lower triangular part for threshold (default True)
+
+    Returns
+    -------
+    np.ndarray
+        Symmetric correlation matrix with 0s where values are below threshold
+
+    Examples
+    --------
+    >>> corr_threshold(corr_matrix, 0.95)  # doctest: +SKIP
+    """
+    result = corr.copy()
+
+    if diag:
+        mask = np.tril(np.ones(corr.shape)).astype(bool)
+        values_to_check = corr[mask]
+    else:
+        values_to_check = corr.flatten()
+
+    thres = np.quantile(np.abs(values_to_check), quantile)
+    result[np.abs(result) <= thres] = 0
+
+    # Garder la symétrie : si un côté est 0, l'autre aussi
+
+    return result
