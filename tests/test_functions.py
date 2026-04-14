@@ -15,7 +15,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from functions import load_data, correlation, corr_threshold
+from functions import (
+    load_data, correlation, corr_threshold,
+    var_contagion, contagion_matrix, contagion_density, contagion_threshold,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -246,3 +249,166 @@ class TestCorrThreshold:
         original = symmetric_corr.copy()
         corr_threshold(symmetric_corr, 0.5)
         np.testing.assert_array_equal(symmetric_corr, original)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for contagion tests
+# ---------------------------------------------------------------------------
+
+def _make_returns(n_obs=200, seed=42):
+    """Generate a small DataFrame of synthetic log-returns (3 assets)."""
+    rng = np.random.default_rng(seed)
+    data = rng.standard_normal((n_obs, 3)) * 0.01
+    # Inject cross-asset dependence: B partly follows A with lag 1
+    data[1:, 1] += 0.5 * data[:-1, 0]
+    return pd.DataFrame(data, columns=["A", "B", "C"])
+
+
+# ---------------------------------------------------------------------------
+# var_contagion
+# ---------------------------------------------------------------------------
+
+class TestVarContagion:
+
+    @pytest.fixture()
+    def returns(self):
+        return _make_returns()
+
+    def test_output_shape(self, returns):
+        """Output has n_lags*N + 1 rows (const + lags) and N columns."""
+        result = var_contagion(returns, n_lags=1)
+        n_assets = len(returns.columns)
+        assert result.shape == (n_assets * 1 + 1, n_assets)
+
+    def test_output_shape_two_lags(self, returns):
+        result = var_contagion(returns, n_lags=2)
+        n_assets = len(returns.columns)
+        assert result.shape == (n_assets * 2 + 1, n_assets)
+
+    def test_columns_match_assets(self, returns):
+        result = var_contagion(returns, n_lags=1)
+        assert list(result.columns) == list(returns.columns)
+
+    def test_nonsignificant_coeffs_zeroed(self, returns):
+        """With a high threshold (1.0), all coefficients should be zeroed."""
+        result = var_contagion(returns, n_lags=1, pvalue_threshold=0.0)
+        # pvalue_threshold=0 means only coefficients with pvalue == 0 survive
+        # In practice most should be zeroed
+        zero_count = (result.values == 0).sum()
+        assert zero_count > 0
+
+    def test_exclude_self_removes_own_lags(self, returns):
+        """With include_self=False, own-lag regressors are dropped."""
+        result = var_contagion(returns, n_lags=1, include_self=False)
+        n_assets = len(returns.columns)
+        # Fewer rows: const + (N-1)*n_lags per equation
+        assert result.shape[0] == (n_assets - 1) * 1 + 1
+
+    def test_detects_known_dependence(self):
+        """B depends on lagged A → coefficient A.L1 in B equation should be nonzero."""
+        returns = _make_returns(n_obs=500, seed=0)
+        result = var_contagion(returns, n_lags=1, pvalue_threshold=0.1)
+        assert result.loc["A.L1", "B"] != 0.0
+
+
+# ---------------------------------------------------------------------------
+# contagion_matrix
+# ---------------------------------------------------------------------------
+
+class TestContagionMatrix:
+
+    @pytest.fixture()
+    def returns(self):
+        return _make_returns(n_obs=500, seed=0)
+
+    def test_square_output(self, returns):
+        matrix = contagion_matrix(returns, n_lags=1)
+        n = len(returns.columns)
+        assert matrix.shape == (n, n)
+
+    def test_diagonal_is_zero(self, returns):
+        matrix = contagion_matrix(returns, n_lags=1)
+        for col in matrix.columns:
+            assert matrix.loc[col, col] == 0.0
+
+    def test_index_and_columns_match(self, returns):
+        matrix = contagion_matrix(returns, n_lags=1)
+        assert list(matrix.index) == list(matrix.columns)
+
+    def test_detects_a_to_b_contagion(self, returns):
+        """Known dependence B <- A should appear as nonzero entry."""
+        matrix = contagion_matrix(returns, n_lags=1, pvalue_threshold=0.1)
+        assert matrix.loc["A", "B"] != 0.0
+
+
+# ---------------------------------------------------------------------------
+# contagion_density
+# ---------------------------------------------------------------------------
+
+class TestContagionDensity:
+
+    def test_full_matrix_returns_100(self):
+        """Matrix with all nonzero off-diagonal → density = 100%."""
+        m = pd.DataFrame(
+            [[0.0, 0.5, 0.3], [0.2, 0.0, 0.4], [0.1, 0.6, 0.0]],
+            index=["A", "B", "C"], columns=["A", "B", "C"],
+        )
+        assert contagion_density(m) == pytest.approx(100.0)
+
+    def test_empty_matrix_returns_0(self):
+        """Matrix with all zeros → density = 0%."""
+        m = pd.DataFrame(
+            np.zeros((3, 3)),
+            index=["A", "B", "C"], columns=["A", "B", "C"],
+        )
+        assert contagion_density(m) == pytest.approx(0.0)
+
+    def test_partial_density(self):
+        """One nonzero off-diagonal out of 6 possible → density ≈ 16.67%."""
+        m = pd.DataFrame(
+            [[0.0, 0.5, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            index=["A", "B", "C"], columns=["A", "B", "C"],
+        )
+        assert contagion_density(m) == pytest.approx(100 / 6, rel=1e-6)
+
+    def test_single_asset_returns_0(self):
+        """1x1 matrix → 0 possible edges → density = 0."""
+        m = pd.DataFrame([[0.0]], index=["A"], columns=["A"])
+        assert contagion_density(m) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# contagion_threshold
+# ---------------------------------------------------------------------------
+
+class TestContagionThreshold:
+
+    @pytest.fixture()
+    def sample_matrix(self):
+        return pd.DataFrame(
+            [[0.0, 0.8, 0.1], [0.3, 0.0, 0.05], [0.6, 0.2, 0.0]],
+            index=["A", "B", "C"], columns=["A", "B", "C"],
+        )
+
+    def test_high_quantile_zeros_small_values(self, sample_matrix):
+        result = contagion_threshold(sample_matrix, 0.8)
+        # Only the largest values should survive
+        assert (result.values == 0).sum() > (sample_matrix.values == 0).sum()
+
+    def test_quantile_zero_keeps_all_nonzero(self, sample_matrix):
+        """quantile=0 → threshold = min(nonzero abs), so smallest nonzero gets zeroed."""
+        result = contagion_threshold(sample_matrix, 0.0)
+        # threshold = min nonzero = 0.05, values with |v| <= 0.05 zeroed
+        assert result.loc["B", "C"] == 0.0
+        assert result.loc["A", "B"] == pytest.approx(0.8)
+
+    def test_no_mutation_of_input(self, sample_matrix):
+        original = sample_matrix.copy()
+        contagion_threshold(sample_matrix, 0.5)
+        pd.testing.assert_frame_equal(sample_matrix, original)
+
+    def test_all_zero_matrix(self):
+        """All-zero matrix should return all zeros regardless of quantile."""
+        m = pd.DataFrame(np.zeros((3, 3)), columns=["A", "B", "C"])
+        result = contagion_threshold(m, 0.5)
+        assert (result.values == 0).all()
