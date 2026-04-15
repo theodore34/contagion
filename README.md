@@ -38,6 +38,7 @@ contagion_stock_markets/
 - **`contagion_matrix(data, n_lags=1, pvalue_threshold=0.1, lag_name="L1")`** : extrait une matrice carrée (N x N) de contagion pour un lag donné. La diagonale est mise à zéro.
 - **`contagion_density(matrix)`** : calcule la densité du réseau de contagion (% de liens non nuls).
 - **`contagion_threshold(matrix, quantile)`** : filtre la matrice de contagion par quantile en valeur absolue.
+- **`var_contagion_masked(data, lag=1, corr_quantile=0.5, pvalue_threshold=0.1)`** : VAR à un seul lag, ne fittant que les coefficients non masqués par la corrélation seuillée à lag 0.
 
 ## Utilisation rapide
 
@@ -60,4 +61,4 @@ print(f"Densité : {contagion_density(matrix):.1f}%")
 pytest tests/test_functions.py -v
 ```
 
-39 tests couvrant toutes les fonctions. Voir [tests/README.md](tests/README.md) pour le détail.
+45 tests couvrant toutes les fonctions. Voir [tests/README.md](tests/README.md) pour le détail.

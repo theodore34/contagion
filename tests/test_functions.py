@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from functions import (
     load_data, correlation, corr_threshold,
     var_contagion, contagion_matrix, contagion_density, contagion_threshold,
+    var_contagion_masked, contagion_r2, rolling_contagion,
 )
 
 
@@ -412,3 +413,360 @@ class TestContagionThreshold:
         m = pd.DataFrame(np.zeros((3, 3)), columns=["A", "B", "C"])
         result = contagion_threshold(m, 0.5)
         assert (result.values == 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for var_contagion_masked tests
+# ---------------------------------------------------------------------------
+
+def _make_correlated_returns(n_obs=500, seed=42):
+    """Returns where A-B are correlated at lag 0, C is independent.
+
+    A and B share a strong common factor (high lag-0 correlation).
+    B also depends on lagged A (detectable by VAR).
+    C is independent of both A and B.
+    """
+    rng = np.random.default_rng(seed)
+    factor = rng.standard_normal(n_obs) * 0.02
+
+    A = factor + rng.standard_normal(n_obs) * 0.005
+    B = 0.8 * factor + rng.standard_normal(n_obs) * 0.005
+    B[1:] += 0.4 * A[:-1]
+    C = rng.standard_normal(n_obs) * 0.02
+
+    return pd.DataFrame({"A": A, "B": B, "C": C})
+
+
+# ---------------------------------------------------------------------------
+# var_contagion_masked
+# ---------------------------------------------------------------------------
+
+class TestVarContagionMasked:
+
+    @pytest.fixture()
+    def returns(self):
+        return _make_correlated_returns()
+
+    def test_output_shape(self, returns):
+        """Output is a square N x N DataFrame."""
+        result = var_contagion_masked(returns, lag=1, corr_quantile=0.3)
+        n = len(returns.columns)
+        assert result.shape == (n, n)
+
+    def test_diagonal_is_zero(self, returns):
+        """Diagonal (self-contagion) must always be 0."""
+        result = var_contagion_masked(returns, lag=1, corr_quantile=0.3)
+        for asset in returns.columns:
+            assert result.loc[asset, asset] == 0.0
+
+    def test_index_and_columns_match(self, returns):
+        result = var_contagion_masked(returns, lag=1, corr_quantile=0.3)
+        assert list(result.index) == list(result.columns)
+        assert list(result.index) == list(returns.columns)
+
+    def test_masked_entries_are_zero(self, returns):
+        """Where the lag-0 correlation mask is zero, output must be zero."""
+        corr_q = 0.3
+        corr = correlation(returns.values, lag=0)
+        mask = corr_threshold(corr, corr_q)
+
+        # Precondition: the mask must have at least one zero off-diagonal
+        off_diag = mask.copy()
+        np.fill_diagonal(off_diag, 1.0)
+        assert (off_diag == 0).any(), "Test setup: mask has no zeros"
+
+        # pvalue_threshold=1.0 so all fitted coefficients survive
+        result = var_contagion_masked(
+            returns, lag=1, corr_quantile=corr_q, pvalue_threshold=1.0,
+        )
+
+        assets = returns.columns.tolist()
+        for i in range(len(assets)):
+            for j in range(len(assets)):
+                if i == j:
+                    continue
+                if mask[i, j] == 0:
+                    assert result.iloc[i, j] == 0.0, (
+                        f"({assets[i]}, {assets[j]}) should be 0 (masked)"
+                    )
+
+    def test_pvalue_zeros_nonsignificant(self, returns):
+        """Strict pvalue_threshold=0.0 zeros out more coefficients."""
+        result_lax = var_contagion_masked(
+            returns, lag=1, corr_quantile=0.3, pvalue_threshold=1.0,
+        )
+        result_strict = var_contagion_masked(
+            returns, lag=1, corr_quantile=0.3, pvalue_threshold=0.0,
+        )
+        nonzero_lax = (result_lax.values != 0).sum()
+        nonzero_strict = (result_strict.values != 0).sum()
+        assert nonzero_strict <= nonzero_lax
+
+    def test_no_mutation_of_input(self, returns):
+        original = returns.copy()
+        var_contagion_masked(returns, lag=1, corr_quantile=0.3)
+        pd.testing.assert_frame_equal(returns, original)
+
+    def test_no_mask_equals_contagion_matrix(self):
+        """Without mask, result matches contagion_matrix(n_lags=1)."""
+        returns = _make_returns(n_obs=200, seed=0)
+        pval = 0.1
+        result_masked = var_contagion_masked(
+            returns, lag=1, corr_quantile=None, pvalue_threshold=pval,
+        )
+        result_global = contagion_matrix(
+            returns, n_lags=1, pvalue_threshold=pval, lag_name="L1",
+        )
+        pd.testing.assert_frame_equal(result_masked, result_global)
+
+
+# ---------------------------------------------------------------------------
+# contagion_r2
+# ---------------------------------------------------------------------------
+
+class TestContagionR2:
+
+    @pytest.fixture()
+    def returns(self):
+        return _make_returns(n_obs=200, seed=0)
+
+    @pytest.fixture()
+    def matrix(self, returns):
+        return contagion_matrix(returns, n_lags=1, pvalue_threshold=0.1)
+
+    def test_total_r2_between_0_and_1(self, returns, matrix):
+        results = contagion_r2(returns, matrix, lag=1)
+        assert 0.0 <= results["total"] <= 1.0
+
+    def test_per_asset_has_all_assets(self, returns, matrix):
+        results = contagion_r2(returns, matrix, lag=1)
+        assert list(results["per_asset"].index) == list(returns.columns)
+
+    def test_per_asset_values_bounded(self, returns, matrix):
+        """R² can be negative if predictions are worse than mean."""
+        results = contagion_r2(returns, matrix, lag=1)
+        assert (results["per_asset"] <= 1.0).all()
+
+    def test_no_categories_no_per_category_key(self, returns, matrix):
+        results = contagion_r2(returns, matrix, lag=1, categories=None)
+        assert "per_category" not in results
+
+    def test_with_categories(self, returns, matrix):
+        categories = {"A": "stock", "B": "stock", "C": "crypto"}
+        results = contagion_r2(returns, matrix, lag=1, categories=categories)
+        assert "per_category" in results
+        assert set(results["per_category"].index) == {"stock", "crypto"}
+
+    def test_per_category_values_bounded(self, returns, matrix):
+        """R² can be negative if predictions are worse than mean."""
+        categories = {"A": "stock", "B": "stock", "C": "crypto"}
+        results = contagion_r2(returns, matrix, lag=1, categories=categories)
+        assert (results["per_category"] <= 1.0).all()
+
+    def test_total_is_mean_of_per_asset(self, returns, matrix):
+        results = contagion_r2(returns, matrix, lag=1)
+        assert results["total"] == pytest.approx(results["per_asset"].mean())
+
+    def test_no_mutation_of_input(self, returns, matrix):
+        original_matrix = matrix.copy()
+        contagion_r2(returns, matrix, lag=1)
+        pd.testing.assert_frame_equal(matrix, original_matrix)
+
+
+# ---------------------------------------------------------------------------
+# Synthetic VAR: known ground-truth coefficients
+# ---------------------------------------------------------------------------
+
+def _make_var1_series(coefs, n_obs=2000, noise_std=0.01, seed=42, assets=None):
+    """Generate a VAR(1) time series with known coefficient matrix.
+
+    Parameters
+    ----------
+    coefs : dict
+        Mapping (source, target) -> coefficient.
+        E.g. {("A", "B"): 0.5} means B_t = 0.5 * A_{t-1} + noise.
+    n_obs : int
+        Number of observations to generate.
+    noise_std : float
+        Standard deviation of the noise term.
+    seed : int
+        Random seed.
+    assets : list of str or None
+        Explicit list of asset names. If None, inferred from coefs keys.
+
+    Returns
+    -------
+    pd.DataFrame
+        Synthetic returns with columns sorted alphabetically.
+    """
+    rng = np.random.default_rng(seed)
+    if assets is None:
+        assets = sorted({a for pair in coefs for a in pair})
+    else:
+        assets = sorted(assets)
+    n = len(assets)
+    idx = {a: i for i, a in enumerate(assets)}
+
+    B = np.zeros((n, n))
+    for (src, tgt), val in coefs.items():
+        B[idx[src], idx[tgt]] = val
+
+    data = np.zeros((n_obs, n))
+    for t in range(1, n_obs):
+        data[t] = B.T @ data[t - 1] + rng.normal(0, noise_std, n)
+
+    return pd.DataFrame(data, columns=assets)
+
+
+class TestVarKnownCoefficients:
+    """Test that var_contagion_masked recovers known VAR(1) coefficients."""
+
+    def test_recovers_single_link(self):
+        """A -> B with coef 0.5, C independent."""
+        true_coef = 0.5
+        abc = ["A", "B", "C"]
+        df = _make_var1_series({("A", "B"): true_coef}, n_obs=5000, noise_std=0.01, assets=abc)
+        matrix = var_contagion_masked(df, lag=1, pvalue_threshold=1)
+
+        # A -> B should be close to 0.5
+        assert matrix.loc["A", "B"] == pytest.approx(true_coef, abs=0.05)
+        # No link from B -> A or involving C
+        assert abs(matrix.loc["B", "A"]) < 0.05
+        assert abs(matrix.loc["C", "A"]) < 0.05
+        assert abs(matrix.loc["C", "B"]) < 0.05
+
+    def test_recovers_two_links(self):
+        """A -> B (0.4) and B -> C (0.3)."""
+        coefs = {("A", "B"): 0.4, ("B", "C"): 0.3}
+        df = _make_var1_series(coefs, n_obs=5000, noise_std=0.01)
+        matrix = var_contagion_masked(df, lag=1, pvalue_threshold=1)
+
+        assert matrix.loc["A", "B"] == pytest.approx(0.4, abs=0.05)
+        assert matrix.loc["B", "C"] == pytest.approx(0.3, abs=0.05)
+
+    def test_recovers_bidirectional(self):
+        """A -> B (0.3) and B -> A (0.2)."""
+        coefs = {("A", "B"): 0.3, ("B", "A"): 0.2}
+        df = _make_var1_series(coefs, n_obs=5000, noise_std=0.01)
+        matrix = var_contagion_masked(df, lag=1, pvalue_threshold=1)
+
+        assert matrix.loc["A", "B"] == pytest.approx(0.3, abs=0.05)
+        assert matrix.loc["B", "A"] == pytest.approx(0.2, abs=0.05)
+
+    def test_zero_coef_stays_small(self):
+        """No link between A and C: coefficient should be near 0."""
+        abc = ["A", "B", "C"]
+        df = _make_var1_series({("A", "B"): 0.5}, n_obs=5000, noise_std=0.01, assets=abc)
+        matrix = var_contagion_masked(df, lag=1, pvalue_threshold=1)
+
+        assert abs(matrix.loc["A", "C"]) < 0.05
+        assert abs(matrix.loc["C", "A"]) < 0.05
+
+    def test_r2_positive_for_predictable_asset(self):
+        """B depends on A, so R² for B should be clearly positive."""
+        abc = ["A", "B", "C"]
+        df = _make_var1_series({("A", "B"): 0.5}, n_obs=5000, noise_std=0.01, assets=abc)
+        matrix = var_contagion_masked(df, lag=1, pvalue_threshold=1)
+        r2 = contagion_r2(df, matrix, lag=1)
+
+        assert r2["per_asset"]["B"] > 0.1
+        # C is independent, R² should be near 0
+        assert r2["per_asset"]["C"] < 0.05
+
+    def test_mask_blocks_true_link(self):
+        """If mask zeros out A->B, the coefficient should be 0."""
+        abc = ["A", "B", "C"]
+        df = _make_var1_series({("A", "B"): 0.5}, n_obs=5000, noise_std=0.01, assets=abc)
+        assets = df.columns.tolist()
+        n = len(assets)
+
+        # Mask that blocks A -> B
+        mask = np.ones((n, n))
+        idx_a = assets.index("A")
+        idx_b = assets.index("B")
+        mask[idx_a, idx_b] = 0
+
+        matrix = var_contagion_masked(df, lag=1, pvalue_threshold=1, mask=mask)
+        assert matrix.loc["A", "B"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# rolling_contagion
+# ---------------------------------------------------------------------------
+
+class TestRollingContagion:
+
+    def test_number_of_intervals(self, tmp_path):
+        """n_intervals = len(data) // interval_size."""
+        df = _make_var1_series({("A", "B"): 0.3}, n_obs=200, noise_std=0.01, assets=["A", "B", "C"])
+        res = rolling_contagion(
+            df, corr_quantile=0.5, asset_type="test",
+            interval_size=50, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        assert len(res["matrices"]) == 4  # 200 // 50
+        assert len(res["r2"]) == 4
+        assert len(res["intervals"]) == 4
+
+    def test_matrices_are_square(self, tmp_path):
+        df = _make_var1_series({("A", "B"): 0.3}, n_obs=200, noise_std=0.01, assets=["A", "B", "C"])
+        res = rolling_contagion(
+            df, corr_quantile=0.5, asset_type="test",
+            interval_size=50, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        for m in res["matrices"]:
+            assert m.shape == (3, 3)
+
+    def test_cache_creates_file(self, tmp_path):
+        """Pickle file should be created after first call."""
+        df = _make_var1_series({("A", "B"): 0.3}, n_obs=200, noise_std=0.01, assets=["A", "B", "C"])
+        rolling_contagion(
+            df, corr_quantile=0.5, asset_type="test",
+            interval_size=50, lag=1, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        expected_file = tmp_path / "test_q0.5_lag1.pkl"
+        assert expected_file.exists()
+
+    def test_cache_returns_same_result(self, tmp_path):
+        """Second call should load from cache and return identical results."""
+        df = _make_var1_series({("A", "B"): 0.3}, n_obs=200, noise_std=0.01, assets=["A", "B", "C"])
+        kwargs = dict(
+            corr_quantile=0.5, asset_type="test",
+            interval_size=50, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        res1 = rolling_contagion(df, **kwargs)
+        res2 = rolling_contagion(df, **kwargs)
+
+        assert len(res1["matrices"]) == len(res2["matrices"])
+        for m1, m2 in zip(res1["matrices"], res2["matrices"]):
+            pd.testing.assert_frame_equal(m1, m2)
+
+    def test_lag_in_filename(self, tmp_path):
+        """Different lags should produce different cache files."""
+        df = _make_var1_series({("A", "B"): 0.3}, n_obs=200, noise_std=0.01, assets=["A", "B", "C"])
+        rolling_contagion(
+            df, corr_quantile=0.5, asset_type="test",
+            interval_size=50, lag=1, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        rolling_contagion(
+            df, corr_quantile=0.5, asset_type="test",
+            interval_size=50, lag=2, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        assert (tmp_path / "test_q0.5_lag1.pkl").exists()
+        assert (tmp_path / "test_q0.5_lag2.pkl").exists()
+
+    def test_r2_keys_present(self, tmp_path):
+        df = _make_var1_series({("A", "B"): 0.3}, n_obs=200, noise_std=0.01, assets=["A", "B", "C"])
+        res = rolling_contagion(
+            df, corr_quantile=0.5, asset_type="test",
+            interval_size=50, pvalue_threshold=1,
+            cache_dir=str(tmp_path),
+        )
+        for r2 in res["r2"]:
+            assert "total" in r2
+            assert "per_asset" in r2

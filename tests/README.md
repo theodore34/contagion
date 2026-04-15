@@ -12,7 +12,7 @@ pytest tests/test_functions.py -v
 
 ## Résumé
 
-**Total** : 39 tests | **Réussite** : 100%
+**Total** : 45 tests | **Réussite** : 100%
 
 ---
 
@@ -75,6 +75,15 @@ pytest tests/test_functions.py -v
 - quantile=0 : conserve les non-zéros
 - Pas de mutation de l'entrée
 - Matrice tout-zéro reste tout-zéro
+
+## TestVarContagionMasked (6 tests)
+
+- Sortie carrée (N x N)
+- Diagonale = 0 (pas d'auto-contagion)
+- Index et colonnes cohérents
+- Entrées masquées (corr lag 0 = 0) forcées à 0
+- p-value stricte réduit les non-zéros
+- Pas de mutation de l'entrée
 
 ---
 
