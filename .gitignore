@@ -5,6 +5,8 @@
 # gitignore template for Jupyter Notebooks
 # website: http://jupyter.org/
 
+results/
+
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/

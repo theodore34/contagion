@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,23 +9,18 @@ import statsmodels.api as sm
 from statsmodels.tsa.tsatools import lagmat
 from tqdm import tqdm
 
-def load_data(assets, log_returns=True, sort_by_sector=False):
-    """Load and merge data from multiple CSV files on the date column.
+
+def load_data(assets, log_returns=True, sort_by_sector=True):
+    """Load CSV files, merge on date, optionally compute log-returns.
 
     Parameters
     ----------
     assets : list of str
-        CSV file prefixes to load (e.g. ['stock', 'crypto', 'etfs']).
+        Asset names (files expected at data/{name}_filled.csv).
     log_returns : bool
-        If True, compute log-returns on numeric columns.
+        If True, convert prices to log-returns.
     sort_by_sector : bool
-        If True, reorder columns by sector (from data/stock_category.xlsx)
-        so that assets of the same sector are grouped together.
-
-    Returns
-    -------
-    pd.DataFrame
-        Data indexed by date.
+        If True, reorder columns by sector from stock_category.xlsx.
     """
     dfs = []
     for asset in assets:
@@ -50,200 +48,16 @@ def load_data(assets, log_returns=True, sort_by_sector=False):
         data.dropna(inplace=True)
 
     data = data.set_index("date")
-
     return data
 
 
-def correlation(data, lag=0):
-    """Calculate the correlation matrix for the given data with a specified lag."""
-    if lag > 0:
-        corr_matrix = np.corrcoef(data[:-lag].T, data[lag:].T)[:data.shape[1], data.shape[1]:]
-    else:
-        corr_matrix = np.corrcoef(data.T)
-
-    return corr_matrix
-
-
-def corr_threshold(corr, quantile, diag=True):
-    """Filter correlation matrix by quantile threshold.
-
-    Parameters
-    ----------
-    corr : np.ndarray
-        Correlation matrix
-    quantile : float
-        Quantile threshold between 0 and 1 for filtering
-    diag : bool, optional
-        If True, consider only lower triangular part for threshold (default True)
-
-    Returns
-    -------
-    np.ndarray
-        Symmetric correlation matrix with 0s where values are below threshold
-
-    Examples
-    --------
-    >>> corr_threshold(corr_matrix, 0.95)  # doctest: +SKIP
-    """
-    result = corr.copy()
-
-    if diag:
-        mask = np.tril(np.ones(corr.shape)).astype(bool)
-        values_to_check = corr[mask]
-    else:
-        values_to_check = corr.flatten()
-
-    thres = np.quantile(np.abs(values_to_check), quantile)
-    result[np.abs(result) <= thres] = 0
-
-    # Garder la symétrie : si un côté est 0, l'autre aussi
-
-    return result
-
-
-def var_contagion(data, n_lags=1, pvalue_threshold=0.1, include_self=True):
-    """Estimate single-equation VAR and return the contagion matrix.
-
-    For each asset j, estimates:
-        r_{j,t} = alpha_j + sum_i beta_{ji} * r_{i,t-1} + eps_{j,t}
-
-    Coefficients with p-value > pvalue_threshold are set to 0.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Log-returns, shape (T, N). Columns = asset names.
-    n_lags : int
-        Number of lags (default 1).
-    pvalue_threshold : float
-        Significance level; coefficients above this are zeroed out.
-    include_self : bool
-        If True, include own lags as regressors.
-
-    Returns
-    -------
-    contagion_df : pd.DataFrame
-        Matrix (N*n_lags + 1, N). Rows = regressors (const + lagged assets),
-        columns = target assets. Non-significant coefficients are 0.
-    """
-    assets = data.columns.tolist()
-
-    # Build lag matrix once for all equations
-    lagged_values = lagmat(data.values, maxlag=n_lags, trim="both")
-    lag_columns = [f"{col}.L{lag}" for lag in range(1, n_lags + 1) for col in assets]
-    lagged_df = pd.DataFrame(lagged_values, columns=lag_columns)
-
-    results = {}
-
-    for asset in tqdm(assets, desc="VAR estimation"):
-        y = data[asset].iloc[n_lags:].reset_index(drop=True)
-
-        X = lagged_df.copy()
-        if not include_self:
-            X = X.drop(columns=[c for c in X.columns if asset in c])
-
-        X = sm.add_constant(X)
-        model = sm.OLS(y, X).fit()
-
-        params = model.params.copy()
-        params[model.pvalues > pvalue_threshold] = 0.0
-        results[asset] = params
-
-    return pd.DataFrame(results)
-
-
-def contagion_matrix(data, n_lags=1, pvalue_threshold=0.1, lag_name="L1"):
-    """Extract a square (N x N) contagion matrix for a specific lag.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Log-returns.
-    n_lags : int
-        Number of lags for the VAR.
-    pvalue_threshold : float
-        Significance threshold.
-    lag_name : str
-        Which lag to extract, e.g. "L1", "L2".
-
-    Returns
-    -------
-    matrix : pd.DataFrame
-        Square matrix (N x N). Entry (i, j) = effect of asset i (lagged)
-        on asset j. Diagonal (self-contagion) is set to 0.
-    """
-    raw = var_contagion(data, n_lags=n_lags, pvalue_threshold=pvalue_threshold)
-
-    # Filter rows for the requested lag
-    mask = raw.index.str.endswith(f".{lag_name}")
-    matrix = raw.loc[mask].copy()
-    matrix.index = [idx.rsplit(".", 1)[0] for idx in matrix.index]
-
-    # Zero out diagonal (no self-contagion)
-    for col in matrix.columns:
-        if col in matrix.index:
-            matrix.loc[col, col] = 0.0
-
-    return matrix
-
-
-def contagion_density(matrix):
-    """Compute contagion density (%) from a square contagion matrix.
-
-    density = #non-zero edges / #possible directed edges * 100
-
-    Parameters
-    ----------
-    matrix : pd.DataFrame
-        Square contagion matrix (N x N). Diagonal is ignored.
-
-    Returns
-    -------
-    float
-        Density as a percentage.
-    """
-    n = len(matrix)
-    count = (matrix.values != 0).sum() - np.trace(matrix.values != 0)
-    possible = n * (n - 1)
-    return count / possible * 100 if possible > 0 else 0.0
-
-
-def contagion_threshold(matrix, quantile):
-    """Filter contagion matrix by absolute-value quantile.
-
-    Parameters
-    ----------
-    matrix : pd.DataFrame
-        Contagion matrix.
-    quantile : float
-        Quantile threshold between 0 and 1.
-
-    Returns
-    -------
-    pd.DataFrame
-        Filtered matrix with values below the quantile threshold set to 0.
-    """
-    result = matrix.copy()
-    values = np.abs(matrix.values).flatten()
-    thres = np.quantile(values[values > 0], quantile) if (values > 0).any() else 0
-    result[np.abs(result) <= thres] = 0
-    return result
-
-
 def load_categories(path="data/stock_category.xlsx"):
-    """Load asset categories from the Excel file.
-
-    Maps the 12 sectors to three groups: 'stock', 'crypto', 'etf'.
+    """Load {asset: category} mapping from Excel (stock / crypto / etf).
 
     Parameters
     ----------
     path : str
         Path to the Excel file with columns 'Stocks' and 'Sectors'.
-
-    Returns
-    -------
-    dict
-        Mapping {asset_name: category}.
     """
     df = pd.read_excel(path)
     sector_to_cat = {"Crypto": "crypto", "US ETF": "etf"}
@@ -253,45 +67,92 @@ def load_categories(path="data/stock_category.xlsx"):
     }
 
 
-def var_contagion_masked(data, lag=1, corr_quantile=None, pvalue_threshold=0.1, mask=None):
-    """Estimate VAR at a single lag, optionally masked by lag-0 correlation.
 
-    When ``corr_quantile`` is provided, uses the lag-0 correlation matrix,
-    thresholded at that quantile, as a sparsity mask: for target asset j,
-    only assets i where ``mask[i, j] != 0`` are included as regressors.
-
-    When ``corr_quantile`` is None and ``mask`` is None (default), all
-    assets are used as regressors (equivalent to a standard single-lag VAR).
-
-    For each asset j, estimates:
-        r_{j,t} = alpha_j + sum_{i in M_j} beta_{ji} * r_{i, t-lag} + eps_{j,t}
+def correlation(data, lag=0):
+    """Correlation matrix, optionally at a given lag.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        Log-returns, shape (T, N). Columns = asset names.
+    data : array-like, shape (T, N)
+        Time series matrix.
     lag : int
-        Single lag to use (e.g., lag=3 uses only r_{i, t-3}, not lags 1-3).
-    corr_quantile : float or None
-        If float, quantile for thresholding the lag-0 correlation matrix
-        (passed to ``corr_threshold``). If None, no masking is applied.
-    pvalue_threshold : float
-        Significance level; fitted coefficients with p-value above this
-        are zeroed out.
-    mask : np.ndarray or None
-        Pre-computed sparsity mask (N x N). If provided, ``corr_quantile``
-        is ignored.
+        Lag between rows. 0 = contemporaneous correlation.
+    """
+    if lag > 0:
+        return np.corrcoef(data[:-lag].T, data[lag:].T)[:data.shape[1], data.shape[1]:]
+    return np.corrcoef(data.T)
+
+
+def corr_threshold(corr, quantile):
+    """Zero out entries below the quantile of |corr|.
+
+    Parameters
+    ----------
+    corr : ndarray, shape (N, N)
+        Correlation matrix.
+    quantile : float
+        Quantile threshold in [0, 1].
+    """
+    result = corr.copy()
+    thres = np.quantile(np.abs(corr.flatten()), quantile)
+    result[np.abs(result) <= thres] = 0
+    return result
+
+
+
+def var_contagion(data, n_lags=1):
+    """OLS-based single-equation VAR.
+
+    Parameters
+    ----------
+    data : DataFrame, shape (T, N)
+        Log-returns with assets as columns.
+    n_lags : int
+        Number of lags in the VAR.
 
     Returns
     -------
-    matrix : pd.DataFrame
-        Square matrix (N x N). Entry (i, j) = effect of asset i (at the
-        chosen lag) on asset j. Diagonal is set to 0.
+    DataFrame, shape (N*n_lags + 1, N)
+        Rows = const + lagged coefficients, columns = target assets.
+    """
+    assets = data.columns.tolist()
+
+    lagged_values = lagmat(data.values, maxlag=n_lags, trim="both")
+    lag_columns = [f"{col}.L{lag}" for lag in range(1, n_lags + 1) for col in assets]
+    lagged_df = pd.DataFrame(lagged_values, columns=lag_columns)
+
+    results = {}
+    for asset in tqdm(assets, desc="VAR estimation"):
+        y = data[asset].iloc[n_lags:].reset_index(drop=True) 
+        X = sm.add_constant(lagged_df) 
+        model = sm.OLS(y, X).fit()  # Fit OLS regression: Y = X * beta + error
+        results[asset] = model.params.copy()
+
+    return pd.DataFrame(results)
+
+
+def var_contagion_masked(data, lag=1, corr_quantile=None, mask=None):
+    """OLS VAR at a single lag with optional sparsity mask and constant.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Log-returns.
+    lag : int
+        Lag order.
+    corr_quantile : float or None
+        If set, build mask from correlation quantile.
+    mask : ndarray or None
+        Pre-computed (N, N) sparsity mask. Overrides corr_quantile.
+
+    Returns
+    -------
+    DataFrame (N+1 x N)
+        Rows = const + assets, columns = target assets.
     """
     assets = data.columns.tolist()
     n_assets = len(assets)
 
-    # Build correlation mask (or include all regressors)
     if mask is not None:
         pass
     elif corr_quantile is not None:
@@ -300,165 +161,125 @@ def var_contagion_masked(data, lag=1, corr_quantile=None, pvalue_threshold=0.1, 
     else:
         mask = np.ones((n_assets, n_assets))
 
-    # y: returns at time t, X: returns at time t-lag
     y_all = data.iloc[lag:].reset_index(drop=True)
     X_all = data.iloc[:-lag].reset_index(drop=True).values
 
-    result = pd.DataFrame(0.0, index=assets, columns=assets)
-
-    alpha = 1e-10
+    result = pd.DataFrame(0.0, index=["const"] + assets, columns=assets)
 
     for j_idx, asset_j in enumerate(assets):
         regressor_indices = np.where(mask[:, j_idx] != 0)[0]
+        y = y_all[asset_j].values
+
         if len(regressor_indices) == 0:
+            result.loc["const", asset_j] = y.mean()
             continue
 
-        y = y_all[asset_j].values
         Xc = X_all[:, regressor_indices]
-        coefs = np.linalg.solve(
-            Xc.T @ Xc + alpha * np.eye(len(regressor_indices)), Xc.T @ y
-        )
+        Xc = np.column_stack([np.ones(len(Xc)), Xc])  # ajout constante
+        coefs = np.linalg.lstsq(Xc, y, rcond=None)[0]
 
+        result.loc["const", asset_j] = coefs[0]
         for k, i_idx in enumerate(regressor_indices):
-            result.iloc[i_idx, j_idx] = coefs[k]
-
-    # No self-contagion
-    for asset in assets:
-        result.loc[asset, asset] = 0.0
+            result.iloc[i_idx + 1, j_idx] = coefs[k + 1]
 
     return result
 
 
 def contagion_r2(data, matrix, lag=1, categories=None):
-    """Compute R² from a contagion matrix.
-
-    For each target asset j, uses the estimated coefficients in matrix
-    to predict returns at lag, then computes R² of the predictions.
+    """R² from a contagion matrix.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        Log-returns, shape (T, N). Columns = asset names.
-    matrix : pd.DataFrame
-        Contagion matrix (N x N) from contagion_matrix() or
-        var_contagion_masked().
+    data : DataFrame
+        Log-returns.
+    matrix : DataFrame (N+1 x N)
+        Contagion coefficient matrix (with const row).
     lag : int
-        Lag used to estimate the matrix.
+        Lag used to build the matrix.
     categories : dict or None
-        Mapping {asset_name: category_name}. If provided, R² is also
-        reported per category.
+        {asset: category} mapping. If set, adds 'per_category' R².
 
     Returns
     -------
-    results : dict
-        'total': float, mean R² across all assets.
-        'per_asset': pd.Series, R² for each asset.
-        'per_category': pd.Series, mean R² per category (only if
-        categories is provided).
+    dict
+        Keys: 'total', 'per_asset', optionally 'per_category'.
     """
     assets = data.columns.tolist()
+    has_const = "const" in matrix.index
 
-    # y: returns at time t, X: returns at time t-lag
     y_all = data.iloc[lag:].reset_index(drop=True)
     X_all = data.iloc[:-lag].reset_index(drop=True).values
 
     r2_values = {}
-
     for j_idx, asset_j in enumerate(assets):
         y = y_all[asset_j].values
-
-        # Prediction: sum of (coef * lagged_return) for all i
         y_pred = np.zeros_like(y)
+
+        if has_const:
+            y_pred += matrix.loc["const", asset_j]
+
         for i_idx, asset_i in enumerate(assets):
-            coef = matrix.iloc[i_idx, j_idx]
+            coef = matrix.loc[asset_i, asset_j]
             if coef != 0:
                 y_pred += coef * X_all[:, i_idx]
 
-        # R²
         ss_res = np.sum((y - y_pred) ** 2)
         ss_tot = np.sum((y - y.mean()) ** 2)
-        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-        r2_values[asset_j] = r2
+        r2_values[asset_j] = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
     r2_series = pd.Series(r2_values)
-
-    results = {
-        "total": r2_series.mean(),
-        "per_asset": r2_series,
-    }
+    results = {"total": r2_series.mean(), "per_asset": r2_series}
 
     if categories is not None:
-        cat_series = pd.Series(categories)
-        cat_series = cat_series.reindex(assets)
+        cat_series = pd.Series(categories).reindex(assets)
         results["per_category"] = r2_series.groupby(cat_series).mean()
 
     return results
 
 
 def rolling_contagion(data, corr_quantile, asset_type, interval_size=None,
-                      obs_per_regressor=2, lag=1, pvalue_threshold=0.1,
-                      cache_dir="results"):
-    """Compute contagion matrices and R² over fixed-size rolling windows.
-
-    Computes the lag-0 correlation mask once on the full dataset, then
-    splits the time series into non-overlapping windows of
-    ``interval_size`` observations.  For each window, estimates the
-    contagion matrix (via ``var_contagion_masked``) and the associated R².
-
-    Results are cached to a pickle file.  If the file already exists it
-    is loaded directly.
+                      obs_per_regressor=2, lag=1, cache_dir="results"):
+    """Contagion matrices over non-overlapping rolling windows (cached).
 
     Parameters
     ----------
-    data : pd.DataFrame
-        Log-returns, shape (T, N). Columns = asset names.
+    data : DataFrame
+        Log-returns.
     corr_quantile : float
-        Quantile for thresholding the lag-0 correlation matrix.
+        Quantile for the correlation sparsity mask.
     asset_type : str
-        Label used in the cache filename (e.g. 'stock', 'crypto',
-        'stock_crypto').
+        Label for cache filename (e.g. 'stock', 'crypto').
     interval_size : int or None
-        Number of observations per window. If None, computed automatically
-        as ``obs_per_regressor * k_max`` where k_max is the maximum
-        number of regressors across all assets (from the correlation mask).
+        Number of (X, y) observations used to fit each window. The raw window
+        spans `interval_size + lag` rows; the first `lag` rows are consumed
+        to build the lagged design matrix. Auto-computed from k_max if None.
     obs_per_regressor : int
-        Multiplier for automatic interval sizing. Only used when
-        ``interval_size`` is None. Lower values give higher R² but
-        more overfitting risk.
+        Min observations per regressor for auto interval_size.
     lag : int
-        VAR lag.
-    pvalue_threshold : float
-        P-value threshold for VAR coefficients.
+        Lag order.
     cache_dir : str
-        Directory for pickle cache files.
+        Directory for pickle cache.
 
     Returns
     -------
     dict
-        'matrices': list of contagion DataFrames,
-        'r2': list of dicts ('total', 'per_asset'),
-        'intervals': list of (start_date, end_date) tuples,
-        'corr_quantile': float,
-        'interval_size': int,
-        'k_max': int (max regressors per asset from the mask).
+        Keys: 'matrices', 'r2_per_asset', 'r2_total', 'intervals',
+        'corr_quantile', 'interval_size', 'k_max'.
     """
-    import os
-    import pickle
-
     os.makedirs(cache_dir, exist_ok=True)
 
-    # Correlation mask computed once on the full dataset
+    #calcul masque
     corr = correlation(data.values, lag=0)
     mask = corr_threshold(corr, corr_quantile)
 
-    # k_max: max number of regressors for any asset (excluding self)
-    mask_no_diag = mask.copy()
-    np.fill_diagonal(mask_no_diag, 0)
-    k_max = int((mask_no_diag != 0).sum(axis=0).max())
+    k_max = int((mask != 0).sum(axis=0).max())
 
-    # Auto interval size
+    # interval_size = nombre d'observations utilisables pour le fit.
+    # La fenêtre brute vaut interval_size + lag.
     if interval_size is None:
-        interval_size = max(obs_per_regressor * k_max, 2 * lag + 1)
+        interval_size = max(obs_per_regressor * k_max, 1)
+
+    window = interval_size + lag
 
     filename = f"{asset_type}_q{corr_quantile}_lag{lag}_n{interval_size}.pkl"
     filepath = os.path.join(cache_dir, filename)
@@ -467,36 +288,32 @@ def rolling_contagion(data, corr_quantile, asset_type, interval_size=None,
         with open(filepath, "rb") as f:
             return pickle.load(f)
 
-    n_intervals = len(data) // interval_size
+    n_intervals = len(data) // window
     raw = data.values
     assets = data.columns.tolist()
-    n_assets = len(assets)
 
     matrices = []
     intervals = []
 
     for i in tqdm(range(n_intervals), desc="Rolling contagion"):
-        start = i * interval_size
-        end = start + interval_size
+        start = i * window
+        end = start + window
         sub_data = data.iloc[start:end]
-
-        matrix = var_contagion_masked(
-            sub_data, lag=lag, pvalue_threshold=pvalue_threshold, mask=mask,
-        )
+        matrix = var_contagion_masked(sub_data, lag=lag, mask=mask)
         matrices.append(matrix)
         intervals.append((data.index[start], data.index[end - 1]))
 
-    # R² global (comme ai-bubble) : pour chaque intervalle, predire avec
-    # sa matrice, puis 1 - var(residus) / var(y_true) sur toute la serie
+    # R² global -> concaténation des prédictions
     y_hat_all = []
     y_true_all = []
-
     for i, matrix in enumerate(matrices):
-        start = i * interval_size
-        end = start + interval_size
+        start = i * window
+        end = start + window
         X_lag = raw[start : end - lag]
         y_true = raw[start + lag : end]
-        y_hat = X_lag @ matrix.values  # (T_interval-lag, N)
+        coef = matrix.loc[assets].values
+        const = matrix.loc["const"].values
+        y_hat = X_lag @ coef + const
         y_hat_all.append(y_hat)
         y_true_all.append(y_true)
 
@@ -522,3 +339,121 @@ def rolling_contagion(data, corr_quantile, asset_type, interval_size=None,
         pickle.dump(results, f)
 
     return results
+
+
+def activation_frequency(data, corr_quantile, asset_type, interval_size=None,
+                         lag=1, binarization_quantile=0.8, eps=1e-6,
+                         plot=True, **kwargs):
+    """Binarize rolling contagion matrices and compute per-link activation frequency.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Log-returns.
+    corr_quantile : float
+        Quantile for sparsity mask.
+    asset_type : str
+        Label for cache.
+    interval_size : int or None
+        Window size (auto if None).
+    lag : int
+        Lag order.
+    binarization_quantile : float
+        Per-matrix quantile threshold for binarization.
+    eps : float
+        Values below eps are treated as zero.
+    plot : bool
+        If True, display heatmap.
+
+    Returns
+    -------
+    dict
+        Keys: 'freq' (N,N), 'binary' (K,N,N), 'rolling'.
+    """
+    res = rolling_contagion(data, corr_quantile=corr_quantile,
+                            asset_type=asset_type,
+                            interval_size=interval_size, lag=lag, **kwargs)
+    assets = data.columns.tolist()
+    mat_arr = np.array([m.loc[assets].values for m in res["matrices"]])
+
+    for m in mat_arr:
+        np.fill_diagonal(m, 0)
+
+    mat_binary = []
+    for m in mat_arr:
+        nonzero = m[np.abs(m) > eps]
+        if len(nonzero) > 0:
+            threshold = np.quantile(np.abs(nonzero), binarization_quantile)
+            mat_binary.append(np.where(np.abs(m) >= threshold, 1, 0))
+        else:
+            mat_binary.append(np.zeros_like(m, dtype=int))
+    mat_binary = np.array(mat_binary)
+
+    freq = np.mean(mat_binary, axis=0)
+
+    if plot:
+        fig, ax = plt.subplots(figsize=(5, 5))
+        sns.heatmap(freq, vmin=0, vmax=1, ax=ax)
+        ax.set_title(
+            f"Freq. activation "
+            f"(corr_q={corr_quantile}, bin_q={binarization_quantile}, "
+            f"interval={res['interval_size']})"
+        )
+        plt.tight_layout()
+        plt.show()
+
+    return {"freq": freq, "binary": mat_binary, "rolling": res}
+
+
+def mean_magnitude(data, corr_quantile, asset_type, interval_size=None,
+                   lag=1, eps=1e-6, plot=True, **kwargs):
+    """Mean coefficient value across rolling windows (signed).
+
+    Parameters
+    ----------
+    data : DataFrame
+        Log-returns.
+    corr_quantile : float
+        Quantile for sparsity mask.
+    asset_type : str
+        Label for cache.
+    interval_size : int or None
+        Window size (auto if None).
+    lag : int
+        Lag order.
+    eps : float
+        Values below eps are treated as zero.
+    plot : bool
+        If True, display heatmap and stats.
+
+    Returns
+    -------
+    dict
+        Keys: 'magnitude' (N,N), 'rolling'.
+    """
+    res = rolling_contagion(data, corr_quantile=corr_quantile,
+                            asset_type=asset_type,
+                            interval_size=interval_size, lag=lag, **kwargs)
+    assets = data.columns.tolist()
+    mat_arr = np.array([m.loc[assets].values for m in res["matrices"]])
+
+    for m in mat_arr:
+        np.fill_diagonal(m, 0)
+
+    magnitude = np.mean(mat_arr, axis=0)
+
+    if plot:
+        fig, ax = plt.subplots(figsize=(5, 5))
+        sns.heatmap(magnitude, center=0, ax=ax)
+        ax.set_title(
+            f"Magnitude moyenne coeff "
+            f"(lag={lag}, corr_q={corr_quantile}, "
+            f"interval={res['interval_size']})"
+        )
+        plt.tight_layout()
+        plt.show()
+        print(f"Magnitude moyenne globale : {magnitude.mean():.6f}")
+        print(f"Min / Max : {magnitude.min():.6f} / {magnitude.max():.6f}")
+        print(f"Liens nuls (|m| < eps) : {(np.abs(magnitude) < eps).sum()}")
+
+    return {"magnitude": magnitude, "rolling": res}
