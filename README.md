@@ -5,7 +5,7 @@ Analyse de la contagion entre actifs financiers par modèles VAR (Vector Autoreg
 ## Installation
 
 ```bash
-pip install numpy pandas matplotlib seaborn statsmodels tqdm pytest networkx openpyxl
+pip install numpy pandas matplotlib seaborn statsmodels tqdm pytest networkx openpyxl scikit-learn
 ```
 
 ## Structure du projet
@@ -69,6 +69,7 @@ Surcouche utilisée par le notebook. Fonctions principales :
 - **`correlation(data, lag=0)`** : corrélation, avec lag optionnel.
 - **`corr_threshold(corr, quantile)`** : masque binarisé par quantile en valeur absolue.
 - **`var_contagion(data, n_lags=1)`** / **`var_contagion_masked(data, lag, corr_quantile=None, mask=None)`** : VAR sans / avec masque de corrélation.
+- **`var_contagion_lasso(data, lag=1, alpha=None, cv=5)`** : VAR(1) avec pénalité L1 par équation (sparsité data-driven, alpha choisi par CV).
 - **`contagion_r2(data, matrix, lag, categories=None)`** : R² global, par actif, et agrégé par secteur.
 - **`rolling_contagion(data, corr_quantile, asset_type, interval_size=None, lag=1, ...)`** : variante qui prend un `DataFrame` déjà chargé en mémoire (même format de retour que `contagion.py`).
 - **`activation_frequency(data, corr_quantile, asset_type, interval_size=None, lag=1, binarization_quantile=0.8, eps=1e-6, plot=True)`** : binarise chaque matrice roulante (seuil = `binarization_quantile` des coefficients non nuls) puis renvoie la fréquence d'activation par lien. La diagonale est toujours mise à zéro.

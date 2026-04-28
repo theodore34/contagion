@@ -83,6 +83,40 @@ def correlation(data, lag=0):
     return np.corrcoef(data.T)
 
 
+def rmt_clip_correlation(C, T):
+    """Marchenko-Pastur eigenvalue clipping of a correlation matrix.
+
+    Eigenvalues below the MP edge lambda_+ = sigma^2 (1 + sqrt(q))^2
+    (q = N/T, sigma^2 = mean eigval) are replaced by their mean; the
+    matrix is reconstructed and renormalised to unit diagonal.
+
+    Parameters
+    ----------
+    C : ndarray, shape (N, N)
+        Empirical correlation matrix.
+    T : int
+        Number of observations used to build C.
+
+    Returns
+    -------
+    ndarray, shape (N, N)
+        Cleaned correlation matrix.
+    """
+    eigvals, eigvecs = np.linalg.eigh(C)
+    N = C.shape[0]
+    q = N / T
+    sigma2 = float(np.mean(eigvals))
+    lambda_plus = sigma2 * (1 + np.sqrt(q)) ** 2
+    bulk = eigvals < lambda_plus
+    eigvals_clean = eigvals.copy()
+    if bulk.any():
+        eigvals_clean[bulk] = eigvals[bulk].mean()
+    C_clean = eigvecs @ np.diag(eigvals_clean) @ eigvecs.T
+    D = np.sqrt(np.diag(C_clean))
+    C_clean = C_clean / np.outer(D, D)
+    return C_clean
+
+
 def corr_threshold(corr, quantile):
     """Zero out entries below the quantile of |corr|.
 
@@ -131,7 +165,7 @@ def var_contagion(data, n_lags=1):
     return pd.DataFrame(results)
 
 
-def var_contagion_masked(data, lag=1, corr_quantile=None, mask=None):
+def var_contagion_masked(data, lag=1, corr_quantile=None, mask=None, rmt_clip=True):
     """OLS VAR at a single lag with optional sparsity mask and constant.
 
     Parameters
@@ -144,6 +178,10 @@ def var_contagion_masked(data, lag=1, corr_quantile=None, mask=None):
         If set, build mask from correlation quantile.
     mask : ndarray or None
         Pre-computed (N, N) sparsity mask. Overrides corr_quantile.
+    rmt_clip : bool
+        When building the mask from ``corr_quantile``, clean the
+        correlation matrix via Marchenko-Pastur eigenvalue clipping
+        before thresholding. Ignored if ``mask`` is provided.
 
     Returns
     -------
@@ -157,6 +195,8 @@ def var_contagion_masked(data, lag=1, corr_quantile=None, mask=None):
         pass
     elif corr_quantile is not None:
         corr = correlation(data.values, lag=0)
+        if rmt_clip:
+            corr = rmt_clip_correlation(corr, T=data.shape[0])
         mask = corr_threshold(corr, corr_quantile)
     else:
         mask = np.ones((n_assets, n_assets))
@@ -181,6 +221,72 @@ def var_contagion_masked(data, lag=1, corr_quantile=None, mask=None):
         result.loc["const", asset_j] = coefs[0]
         for k, i_idx in enumerate(regressor_indices):
             result.iloc[i_idx + 1, j_idx] = coefs[k + 1]
+
+    return result
+
+
+def var_contagion_lasso(data, lag=1, alpha=None, cv=5, max_iter=5000,
+                        n_jobs=-1, standardize=True):
+    """OLS VAR at a single lag with Lasso regularisation per equation.
+
+    Replaces the correlation-quantile mask by a data-driven sparsity:
+    each target asset is regressed on the lagged values of all assets
+    via L1-regularised regression, with the penalty ``alpha`` chosen by
+    cross-validation when not supplied.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Log-returns.
+    lag : int
+        Lag order.
+    alpha : float or None
+        L1 penalty. If None, ``alpha`` is chosen per equation via
+        ``LassoCV`` with ``cv`` folds.
+    cv : int
+        Number of CV folds when ``alpha`` is None.
+    max_iter : int
+        Max iterations for the coordinate-descent solver.
+    n_jobs : int
+        Parallel jobs for ``LassoCV``.
+    standardize : bool
+        Standardise regressors before fitting (recommended for Lasso).
+        Coefficients are rescaled back to the original units.
+
+    Returns
+    -------
+    DataFrame, shape (N+1, N)
+        Rows = const + assets, columns = target assets. Zero entries
+        correspond to coefficients shrunk to zero by the Lasso.
+    """
+    from sklearn.linear_model import Lasso, LassoCV
+
+    assets = data.columns.tolist()
+    y_all = data.iloc[lag:].reset_index(drop=True)
+    X_raw = data.iloc[:-lag].reset_index(drop=True).values
+
+    if standardize:
+        x_mean = X_raw.mean(axis=0)
+        x_std = X_raw.std(axis=0)
+        x_std = np.where(x_std > 0, x_std, 1.0)
+        X = (X_raw - x_mean) / x_std
+    else:
+        x_mean = np.zeros(X_raw.shape[1])
+        x_std = np.ones(X_raw.shape[1])
+        X = X_raw
+
+    result = pd.DataFrame(0.0, index=["const"] + assets, columns=assets)
+
+    for j_idx, asset_j in enumerate(tqdm(assets, desc="Lasso VAR")):
+        y = y_all[asset_j].values
+        if alpha is None:
+            model = LassoCV(cv=cv, max_iter=max_iter, n_jobs=n_jobs).fit(X, y)
+        else:
+            model = Lasso(alpha=alpha, max_iter=max_iter).fit(X, y)
+        coef_orig = model.coef_ / x_std
+        intercept = model.intercept_ - np.dot(coef_orig, x_mean)
+        result.loc["const", asset_j] = intercept
+        result.iloc[1:, j_idx] = coef_orig
 
     return result
 
@@ -238,7 +344,8 @@ def contagion_r2(data, matrix, lag=1, categories=None):
 
 
 def rolling_contagion(data, corr_quantile, asset_type, interval_size=None,
-                      obs_per_regressor=2, lag=1, cache_dir="results"):
+                      obs_per_regressor=2, lag=1, cache_dir="results",
+                      rmt_clip=True):
     """Contagion matrices over non-overlapping rolling windows (cached).
 
     Parameters
@@ -270,6 +377,8 @@ def rolling_contagion(data, corr_quantile, asset_type, interval_size=None,
 
     #calcul masque
     corr = correlation(data.values, lag=0)
+    if rmt_clip:
+        corr = rmt_clip_correlation(corr, T=data.shape[0])
     mask = corr_threshold(corr, corr_quantile)
 
     k_max = int((mask != 0).sum(axis=0).max())
