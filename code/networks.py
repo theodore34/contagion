@@ -13,6 +13,26 @@ import networkx as nx
 import numpy as np
 
 
+def correlation(data, lag=0):
+    """Matrice de corrélation, éventuellement à un retard donné.
+
+    Parameters
+    ----------
+    data : array-like, shape (T, N)
+        Matrice de séries temporelles.
+    lag : int
+        Retard entre lignes. 0 = corrélation contemporaine.
+
+    Returns
+    -------
+    ndarray, shape (N, N)
+        Corrélation entre ``data[:-lag]`` et ``data[lag:]`` (pleine si lag=0).
+    """
+    if lag > 0:
+        return np.corrcoef(data[:-lag].T, data[lag:].T)[:data.shape[1], data.shape[1]:]
+    return np.corrcoef(data.T)
+
+
 def build_pmfg(C_abs):
     """Planar Maximally Filtered Graph pondéré par |C| (3(n-2) arêtes max).
 

@@ -4,10 +4,9 @@ Backend non interactif (Agg) : chaque fonction construit une figure et la sauve
 dans ``Fig/`` (PNG), puis la ferme. Aucune fenêtre n'est ouverte, les scripts
 sont donc exécutables sans affichage.
 
-Les figures reprennent une à une celles du notebook ``monthly_correlations`` :
-sélection des périodes, comparaison signé/|C|, « 3 vues par méthode », balayage
-du seuil q, détection par pics, comparaison des périodes retenues, superposition
-λ_max/⟨λ⟩, et balayage des lags VAR.
+Figures du pipeline : sélection des périodes, comparaison signé/|C|, « 3 vues
+par méthode », balayage du seuil q, détection par pics, comparaison des périodes
+retenues, superposition λ_max/⟨λ⟩, et balayage des lags VAR.
 """
 import matplotlib
 matplotlib.use("Agg")

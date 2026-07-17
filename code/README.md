@@ -1,6 +1,7 @@
 # Pipeline contagion SIS ↔ E_i
 
-Refonte en scripts du notebook `monthly_correlations.ipynb` (pipeline A → Z).
+Pipeline A → Z en scripts (refonte historique du notebook
+`monthly_correlations.ipynb`, aujourd'hui supprimé — voir l'historique git).
 Chaque étape met ses résultats lourds en cache (`cache/`, pickles) et ses
 figures dans `Fig/`. Les calculs déjà faits ne sont jamais refaits : les
 signatures de cache sont sensibles au contenu (données, fenêtres, paramètres).
@@ -49,7 +50,6 @@ N = 146 actions, log-rendements intraday 30 min, 2019-04 → 2023-05.
 
 ## Cache
 
-`cache/` est amorcé avec les pickles déjà calculés par le notebook
-(copiés depuis `.cache/monthly_correlations`). Mettre `config.FORCE_RECOMPUTE =
-True` pour tout recalculer. Supprimer un fichier de `cache/` force le recalcul
+`cache/` est amorcé avec les pickles déjà calculés (signatures sensibles au
+contenu). Mettre `config.FORCE_RECOMPUTE = True` pour tout recalculer. Supprimer un fichier de `cache/` force le recalcul
 de cette seule étape.

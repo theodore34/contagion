@@ -1,3 +1,16 @@
+### Project-specific ###
+# Local notebook backups (.bak / .bak2) collected under backup/
+backup/
+*.ipynb.bak
+*.ipynb.bak2
+# Regenerable compute caches (code/ pipeline writes here)
+cache/
+.cache/
+# Regenerable figures (code/plots.py, rapport_figures.ipynb) — only the
+# final report figures (Fig/rapport/) are versioned
+Fig/*
+!Fig/rapport/
+
 # Created by https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,visualstudio,visualstudiocode,macos
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,jupyternotebooks,visualstudio,visualstudiocode,macos
 

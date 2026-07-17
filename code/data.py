@@ -19,37 +19,54 @@ from cache import disk_cache
 from networks import build_filtered_corr, build_pmfg, fit_var, prepare_for_sis
 
 
-def load_returns():
-    """Log-rendements intraday, fusionnés sur la date et triés par secteur.
+def load_data(assets, log_returns=True, sort_by_sector=True):
+    """Charge les CSV des actifs, fusionne sur la date, rendements optionnels.
 
-    Réplique exactement ``functions.load_data(ASSETS, log_returns=True,
-    sort_by_sector=True)`` mais avec des chemins absolus (utilisable depuis
-    n'importe quel répertoire courant).
+    Parameters
+    ----------
+    assets : list of str
+        Noms d'actifs (fichiers attendus : ``DATA_DIR/{nom}_filled.csv``).
+    log_returns : bool
+        Si True, convertit les prix en log-rendements.
+    sort_by_sector : bool
+        Si True, réordonne les colonnes par secteur (stock_category.xlsx).
 
     Returns
     -------
     DataFrame, shape (T, N)
-        Index = horodatage, colonnes = actifs (ordonnées par secteur puis nom).
+        Index = horodatage, colonnes = actifs.
     """
     dfs = [pd.read_csv(config.DATA_DIR / f"{a}_filled.csv", parse_dates=["date"])
-           for a in config.ASSETS]
+           for a in assets]
     data = dfs[0]
     for df in dfs[1:]:
         data = data.merge(df, on="date", how="inner")
 
-    if config.SORT_BY_SECTOR:
+    if sort_by_sector:
         cat = pd.read_excel(config.DATA_DIR / "stock_category.xlsx")
         sector_order = cat.set_index("Stocks")["Sectors"]
         numeric_cols = [c for c in data.columns if c != "date"]
         sorted_cols = sorted(numeric_cols, key=lambda c: (sector_order.get(c, ""), c))
         data = data[["date"] + sorted_cols]
 
-    if config.LOG_RETURNS:
+    if log_returns:
         numeric_cols = data.select_dtypes(include=np.number).columns
         data[numeric_cols] = np.log(data[numeric_cols] / data[numeric_cols].shift(1))
         data = data.dropna()
 
     return data.set_index("date")
+
+
+def load_returns():
+    """Log-rendements intraday des actifs du pipeline (voir :func:`load_data`).
+
+    Returns
+    -------
+    DataFrame, shape (T, N)
+        Index = horodatage, colonnes = actifs (ordonnées par secteur puis nom).
+    """
+    return load_data(config.ASSETS, log_returns=config.LOG_RETURNS,
+                     sort_by_sector=config.SORT_BY_SECTOR)
 
 
 def _compute_base(data, N, mask_off):

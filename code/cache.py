@@ -5,9 +5,8 @@ sinon exécute ``compute()``, sauve le résultat et le renvoie. La signature
 ``sig`` doit changer dès que le résultat changerait : utiliser :func:`sig_of`
 pour fabriquer une signature sensible au CONTENU (np.ndarray inclus).
 
-Schéma de nommage compatible avec les pickles déjà produits par le notebook
-``monthly_correlations.ipynb`` : les fichiers existants sont donc réutilisés tels
-quels (copiés dans ``cache/`` au démarrage du projet).
+Schéma de nommage stable : les pickles déjà produits sont réutilisés tels quels
+d'une exécution à l'autre.
 """
 import glob
 import hashlib
