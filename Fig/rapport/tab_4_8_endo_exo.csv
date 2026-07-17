@@ -1,0 +1,18 @@
+period,event,n (endo/exo),% stocks R²>0.6
+2019-04-01 - 2019-05-15,US–China trade war,0.8,13.7
+2019-07-22 - 2019-08-14,Renewed US–China tariffs,0.85,3.4
+2019-11-19 - 2020-02-04,"Trade truce, pre-COVID calm",0.79,0.0
+2020-02-11 - 2020-03-06,COVID-19 crash,0.94,32.2
+2020-05-29 - 2020-06-16,COVID second wave,0.9,4.1
+2020-08-24 - 2020-09-14,Nasdaq tech correction,0.89,0.0
+2020-10-19 - 2020-11-04,"COVID wave, US election, vaccine",0.84,0.0
+2020-12-10 - 2021-03-04,Reflation trade & GameStop,0.89,0.0
+2021-03-29 - 2021-05-13,Spring inflation scare,0.76,0.0
+2021-08-05 - 2021-09-29,Evergrande crisis & Fed tapering,0.79,0.7
+2021-11-09 - 2021-11-29,Omicron variant,0.82,0.0
+2022-01-03 - 2022-01-20,"Fed turns hawkish, tech sell-off",0.73,1.4
+2022-02-08 - 2022-03-01,Russia invades Ukraine,0.87,0.7
+2022-04-08 - 2022-06-22,Inflation & rate-hike bear market,0.88,3.4
+2022-08-01 - 2022-09-29,"Jackson Hole speech, high inflation",0.87,0.0
+2022-12-02 - 2022-12-22,"Hawkish Fed, year-end sell-off",0.8,0.0
+2023-01-20 - 2023-02-16,High inflation & jobs data,0.85,0.0
