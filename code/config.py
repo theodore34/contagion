@@ -19,6 +19,10 @@ for _d in (CACHE_DIR, FIG_DIR, RESULTS_DIR):
 # Recalcule tout en ignorant le cache si True (mettre à True ponctuellement).
 FORCE_RECOMPUTE = False
 
+# Plafond de workers joblib pour les balayages parallèles : borne la RAM
+# (chaque worker duplique les caches ; trop de workers => explosion mémoire).
+N_JOBS = 2
+
 # ── Données ───────────────────────────────────────────────────────────────────
 ASSETS = ["stock"]          # fichiers data/{a}_filled.csv fusionnés sur la date
 LOG_RETURNS = True
@@ -70,4 +74,4 @@ Q_SWEEP = _np.round(_np.concatenate([_np.arange(0.50, 0.80, 0.05),
 Q_PANEL = _np.round(_np.arange(0.50, 0.96, 0.05), 2)   # grille grossière pour le panneau
 LAG_SCAN = list(range(1, 30))                          # lags VAR balayés pour le fit SIS
 # balayage des taux SIS : B (récupération) et R (infection), même grille pour les deux
-BR_GRID = _np.round(_np.arange(0.80, 1.21, 0.10), 2)   # [0.8, 0.9, 1.0, 1.1, 1.2]
+BR_GRID = _np.round(_np.arange(0.80, 1.21, 0.20), 2)   # [0.8, 1.0, 1.2] (réduit : RAM)

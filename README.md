@@ -15,19 +15,23 @@ pip install numpy pandas matplotlib seaborn statsmodels tqdm pytest networkx ope
 ```
 contagion_stock_markets/
 ├── data/                    # CSV des prix + stock_category.xlsx (secteurs)
-├── code/                    # Package pipeline (voir code/README.md)
+├── code/                    # Fonctions utilitaires + pipeline (voir code/README.md)
+├── notebooks/               # Notebooks (consomment code/)
+│   ├── synthese.ipynb           # Résultats principaux (construit sur code/)
+│   ├── rapport_figures.ipynb    # Figures HD du rapport → Fig/rapport/
+│   ├── paper_chen2023.ipynb     # Reproduction de Chen et al. (2023)
+│   ├── sis_matrices_locales.ipynb
+│   └── article.ipynb            # Calibration E_i → proba ξ_emp (code/proxy.py)
 ├── tests/                   # Tests unitaires du package (pytest tests/ -v)
 ├── Fig/rapport/             # Figures finales du rapport (seules versionnées)
-├── synthese.ipynb           # Résultats principaux (6 étapes, construit sur code/)
-├── rapport_figures.ipynb    # Figures HD du rapport de stage → Fig/rapport/
-├── paper_chen2023.ipynb     # Reproduction de Chen et al. (2023) : SIS, PMFG, matrice réponse
 └── README.md
 ```
 
-Tout le code réutilisable vit dans le package [`code/`](code/README.md)
+Toutes les fonctions réutilisables vivent dans [`code/`](code/README.md)
 (chargement des données, matrices de contagion, détection des périodes,
-dynamique SIS, sélection, figures). Les notebooks sont des consommateurs de ce
-package :
+dynamique SIS, sélection, calibration `proxy.py`, figures). Les notebooks, dans
+[`notebooks/`](notebooks/), en sont des consommateurs et ajoutent au début de la
+première cellule `sys.path.insert(0, '../code')` :
 
 - **`synthese.ipynb`** — notebook propre des résultats : clustering par
   période, signaux réseau dans le temps, grille (B, R), test hors-crise,
@@ -37,6 +41,8 @@ package :
 - **`paper_chen2023.ipynb`** — référence théorique : dérivation complète du
   modèle (PMFG, champ moyen SIS, jacobien, matrice réponse G, temps de
   réponse τ).
+- **`article.ipynb`** — calibration de `E_i` en probabilité de stress `ξ_emp`
+  (via [`code/proxy.py`](code/proxy.py)) et comparaison `x_SIS` ↔ `ξ_emp`.
 
 ## Lancer le pipeline sans notebook
 

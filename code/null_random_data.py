@@ -79,7 +79,7 @@ if __name__ == '__main__':
     NB = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     real = _count(REALVALS)
     print('REAL :', real, flush=True)
-    res = Parallel(n_jobs=min(NB, 12))(delayed(_one_null)(s) for s in range(NB))
+    res = Parallel(n_jobs=min(NB, config.N_JOBS))(delayed(_one_null)(s) for s in range(NB))
     null = {m: np.array([r['counts'][m] for r in res], float) for m in SIS_MODELS}
     print(f'\n{NB} block-bootstraps (courbes ~{np.mean([r["n_curves"] for r in res]):.0f}/realisation)')
     print(f"{'methode':10s} {'reel':>5s} {'null_moy':>8s} {'null_sd':>7s} {'z':>6s} {'p':>8s}")

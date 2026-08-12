@@ -126,7 +126,7 @@ def run_qsweep(ctx, intervals_chrono, crisis_map, period_data):
                  config.B_FIT, config.R_FIT, config.T_LONG, config.TOL_EQ, "fast")
 
     def _compute():
-        res = Parallel(n_jobs=min(len(config.Q_SWEEP), os.cpu_count()))(
+        res = Parallel(n_jobs=min(len(config.Q_SWEEP), config.N_JOBS))(
             delayed(_corr_thr_fits)(q, ctx, intervals_chrono, period_data)
             for q in config.Q_SWEEP)
         return {round(float(q), 2): r for q, r in zip(config.Q_SWEEP, res)}
@@ -174,7 +174,7 @@ def _br_counts(B, R, caches, A_sis, r2_seuil):
                 ok = ~np.isnan(E_i)
                 if ok.sum() < 3:
                     continue
-                xt = sis.integrate_fast(d, gi, A, B=B, R=R)
+                xt = sis.integrate_xscan(d, gi, A, B=B, R=R)   # intégrateur léger (balayage)
                 r2 = linregress(E_i[ok], xt[ok]).rvalue ** 2
                 r2all[m].append(r2)
                 Es[m].append(E_i[ok])
@@ -232,7 +232,7 @@ def run_br_scan(ctx, windows, crisis_map, period_data, B_grid, R_grid):
                  config.CORR_THRESHOLD, config.T_LONG, config.TOL_EQ, config.R2_SEUIL, "br_fast_r2")
 
     def _compute():
-        res = Parallel(n_jobs=min(len(pairs), os.cpu_count()))(
+        res = Parallel(n_jobs=min(len(pairs), config.N_JOBS))(
             delayed(_br_counts)(B, R, caches, ctx.A_sis, config.R2_SEUIL) for (B, R) in pairs)
         return {p: r for p, r in zip(pairs, res)}
 

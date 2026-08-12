@@ -36,6 +36,7 @@ de B/R) et ne recalcule que l'intégration SIS ; le 1er passage prend ~10-15 min
 | `selection.py`  | tableaux R², sélection des périodes/courbes, redondance |
 | `plots.py`      | toutes les figures → `Fig/` (backend Agg) |
 | `pipeline.py`   | orchestration partagée (sans tracé) |
+| `proxy.py`      | calibration de E_i en probabilité de stress ξ_emp (voir notebooks/article.ipynb) |
 | `run_*.py`      | scripts exécutables (un par tâche) |
 
 Le balayage (B, R) : `config.BR_GRID` fixe les valeurs de B (récupération) et R
