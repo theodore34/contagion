@@ -13,27 +13,27 @@ signé/|C|, détection par pics, superposition ⟨|C|⟩ vs λ_max/⟨λ⟩.
 Tout est mis en cache (cache/) : relancer ne recalcule que ce qui a changé.
 """
 import data
-import periods
-import pipeline
+import model
+import analysis
 import plots
 
 
 def main():
     ctx = data.build_context()
 
-    base = pipeline.load_periods(ctx)
+    base = analysis.load_periods(ctx)
     intervals_chrono = base["intervals_chrono"]
     mc_smooth = base["mc_smooth"]
     crisis_map = base["crisis_map"]
 
-    peak = periods.detect_peaks(ctx.mc_all, ctx.mean_mc)
-    peak_rises = periods.peak_rises(peak["peak_intervals"], peak["mc_s"])
+    peak = model.detect_peaks(ctx.mc_all, ctx.mean_mc)
+    peak_rises = model.peak_rises(peak["peak_intervals"], peak["mc_s"])
 
     # détection signée seule (pas de SIS ici : ce script ne fait que les périodes)
-    E_signed = periods.compute_E_signed(ctx.data, ctx.N)
+    E_signed = model.compute_E_signed(ctx.data, ctx.N)
     mc_signed, mc_signed_smooth, intervals_signed, crisis_map_signed = \
-        periods.detect_global_windows_signed(E_signed)
-    spec = pipeline.spectral(ctx)
+        model.detect_global_windows_signed(E_signed)
+    spec = analysis.spectral(ctx)
 
     # ── Résumés chiffrés ──────────────────────────────────────────────────────
     print(f"\nBoucle 1 (|C|) : {len(intervals_chrono)} fenetres de crise")

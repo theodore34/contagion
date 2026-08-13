@@ -13,17 +13,17 @@ Cache : 'br_scan'.
 """
 import config
 import data
-import pipeline
+import analysis
 import plots
 
 
 def main():
     ctx = data.build_context()
-    base = pipeline.load_periods(ctx)
+    base = analysis.load_periods(ctx)
     intervals_chrono, crisis_map = base["intervals_chrono"], base["crisis_map"]
-    period_data = pipeline.fit_main(ctx, intervals_chrono, crisis_map)["period_data"]
+    period_data = analysis.fit_main(ctx, intervals_chrono, crisis_map)["period_data"]
 
-    scan = pipeline.run_br_scan(ctx, intervals_chrono, crisis_map, period_data,
+    scan = analysis.run_br_scan(ctx, intervals_chrono, crisis_map, period_data,
                                 config.BR_GRID, config.BR_GRID)
 
     # ── Récapitulatif : référence (B=R=1) vs meilleur (B, R) par méthode ──────

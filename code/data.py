@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 import config
-from cache import disk_cache
+from config import disk_cache
 from networks import build_filtered_corr, build_pmfg, fit_var, prepare_for_sis
 
 

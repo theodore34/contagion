@@ -1,8 +1,8 @@
 # Contagion sur les marchés boursiers
 
-Analyse de la contagion entre actifs financiers : réseaux de contagion
-(PMFG, VAR, corrélation seuillée), dynamique SIS par période de crise, et
-comparaison SIS ↔ énergie de corrélation E_i.
+Analyse de la contagion entre actifs financiers : réseaux (PMFG, VAR,
+corrélation seuillée), dynamique SIS par période de crise, et comparaison
+SIS ↔ énergie de corrélation E_i.
 
 ## Installation
 
@@ -10,39 +10,38 @@ comparaison SIS ↔ énergie de corrélation E_i.
 pip install numpy pandas matplotlib seaborn statsmodels tqdm pytest networkx openpyxl scikit-learn
 ```
 
-## Structure du projet
+## Structure
 
 ```
-contagion_stock_markets/
+contagion/
 ├── data/                    # CSV des prix + stock_category.xlsx (secteurs)
 ├── code/                    # Fonctions utilitaires + pipeline (voir code/README.md)
-├── notebooks/               # Notebooks (consomment code/)
-│   ├── synthese.ipynb           # Résultats principaux (construit sur code/)
-│   ├── rapport_figures.ipynb    # Figures HD du rapport → Fig/rapport/
-│   ├── paper_chen2023.ipynb     # Reproduction de Chen et al. (2023)
+├── notebooks/               # Notebooks (utilisent code/)
+│   ├── synthese.ipynb           # Résultats principaux
+│   ├── rapport_figures.ipynb    # Figures du rapport → Fig/rapport/
+│   ├── paper_chen2023.ipynb     # Modèle SIS théorique
 │   ├── sis_matrices_locales.ipynb
-│   └── article.ipynb            # Calibration E_i → proba ξ_emp (code/proxy.py)
-├── tests/                   # Tests unitaires du package (pytest tests/ -v)
-├── Fig/rapport/             # Figures finales du rapport (seules versionnées)
+│   └── article.ipynb            # Calibration E_i → proba ξ_emp
+├── tests/                   # Tests (pytest tests/ -v)
+├── Fig/rapport/             # Figures du rapport (seules versionnées)
 └── README.md
 ```
 
-Toutes les fonctions réutilisables vivent dans [`code/`](code/README.md)
-(chargement des données, matrices de contagion, détection des périodes,
-dynamique SIS, sélection, calibration `proxy.py`, figures). Les notebooks, dans
-[`notebooks/`](notebooks/), en sont des consommateurs et ajoutent au début de la
-première cellule `sys.path.insert(0, '../code')` :
+Les fonctions réutilisables sont dans [`code/`](code/README.md), réparties en
+6 modules : `config`, `data`, `networks`, `model` (périodes + SIS),
+`analysis` (sélection, endo/exo, modèle nul, calibration ξ_emp, orchestration),
+`plots`. Les notebooks les utilisent ; ils commencent par
+`sys.path.insert(0, '../code')` :
 
-- **`synthese.ipynb`** — notebook propre des résultats : clustering par
-  période, signaux réseau dans le temps, grille (B, R), test hors-crise,
-  actifs retenus par méthode, communautés de Louvain, score endo/exo.
+- **`synthese.ipynb`** — résultats principaux : clustering par période, signaux
+  réseau dans le temps, grille (B, R), test hors-crise, actifs retenus par
+  méthode, communautés, score endo/exo.
 - **`rapport_figures.ipynb`** — régénère les figures et tableaux du rapport
-  (PDF + PNG 300 dpi) dans `Fig/rapport/`.
-- **`paper_chen2023.ipynb`** — référence théorique : dérivation complète du
-  modèle (PMFG, champ moyen SIS, jacobien, matrice réponse G, temps de
-  réponse τ).
+  (PDF + PNG) dans `Fig/rapport/`.
+- **`paper_chen2023.ipynb`** — modèle SIS théorique : PMFG, dynamique, matrice
+  réponse.
 - **`article.ipynb`** — calibration de `E_i` en probabilité de stress `ξ_emp`
-  (via [`code/proxy.py`](code/proxy.py)) et comparaison `x_SIS` ↔ `ξ_emp`.
+  (via `analysis`) et comparaison `x_SIS` ↔ `ξ_emp`.
 
 ## Lancer le pipeline sans notebook
 
@@ -50,8 +49,7 @@ première cellule `sys.path.insert(0, '../code')` :
 python code/run_all.py     # périodes → SIS → courbes → expériences
 ```
 
-Voir [`code/README.md`](code/README.md) pour le détail des scripts, des
-modules et du cache.
+Voir [`code/README.md`](code/README.md) pour les scripts, modules et le cache.
 
 ## Tests
 

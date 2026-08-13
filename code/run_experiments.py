@@ -11,19 +11,19 @@ Caches : 'qsweep_corrthr', 'var_lag_scan' (cache/).
 """
 import config
 import data
-import pipeline
+import analysis
 import plots
 
 
 def main():
     ctx = data.build_context()
-    base = pipeline.load_periods(ctx)
+    base = analysis.load_periods(ctx)
     intervals_chrono, crisis_map = base["intervals_chrono"], base["crisis_map"]
-    main_res = pipeline.fit_main(ctx, intervals_chrono, crisis_map)
+    main_res = analysis.fit_main(ctx, intervals_chrono, crisis_map)
     period_data, selected = main_res["period_data"], main_res["selected"]
 
     # ── Balayage du seuil q de 'Corr thr' ─────────────────────────────────────
-    sweep = pipeline.run_qsweep(ctx, intervals_chrono, crisis_map, period_data)
+    sweep = analysis.run_qsweep(ctx, intervals_chrono, crisis_map, period_data)
     print(f"\nBalayage q : {len(config.Q_SWEEP)} seuils de {config.Q_SWEEP[0]:.2f} "
           f"a {config.Q_SWEEP[-1]:.2f}")
     for q in config.Q_SWEEP:
@@ -36,7 +36,7 @@ def main():
     plots.plot_qsweep_medians(sweep)
 
     # ── Balayage des lags VAR ─────────────────────────────────────────────────
-    ldf = pipeline.run_lag_scan(ctx, selected, period_data)
+    ldf = analysis.run_lag_scan(ctx, selected, period_data)
     print("\nBalayage des lags VAR -> qualite du fit SIS :")
     print(ldf.round(3).to_string())
     best_nsup, best_agg = int(ldf["n_sup"].idxmax()), int(ldf["R2_agrege"].idxmax())

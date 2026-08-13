@@ -15,7 +15,7 @@ import numpy as np
 
 import config
 import data
-import pipeline
+import analysis
 
 
 def _summary(period_data, windows, label):
@@ -34,22 +34,22 @@ def _summary(period_data, windows, label):
 
 def main():
     ctx = data.build_context()
-    base = pipeline.load_periods(ctx)
+    base = analysis.load_periods(ctx)
     intervals_chrono, crisis_map = base["intervals_chrono"], base["crisis_map"]
 
     # 1) fenêtres croissantes (|C|)
-    main_res = pipeline.fit_main(ctx, intervals_chrono, crisis_map)
+    main_res = analysis.fit_main(ctx, intervals_chrono, crisis_map)
     period_data, selected = main_res["period_data"], main_res["selected"]
     _summary(period_data, intervals_chrono, "Fenetres croissantes (|C|)")
     print(f"\n{len(selected)} periode(s) retenue(s) (>=1 fit R²>{config.R2_SEUIL}) : "
           f"{[(str(ctx.all_days[a]), str(ctx.all_days[b])) for a, b in selected]}")
 
     # 2) montées des pics
-    pk = pipeline.fit_peaks(ctx, crisis_map)
+    pk = analysis.fit_peaks(ctx, crisis_map)
     _summary(pk["peak_pd"], pk["peak_rises"], "Montees des pics")
 
     # 3) détection signée (sans valeur absolue)
-    sig = pipeline.fit_signed(ctx)
+    sig = analysis.fit_signed(ctx)
     _summary(sig["period_data_sig"], sig["intervals_signed"], "Detection signee")
     print(f"\n{len(sig['selected_sig'])} periode(s) signee(s) retenue(s).")
 
