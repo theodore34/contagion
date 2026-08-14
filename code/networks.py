@@ -1,32 +1,32 @@
-"""Construction des matrices de contagion à partir des rendements / corrélations.
+"""Build contagion matrices from returns / correlations.
 
-Quatre familles de réseaux alimentent ensuite la dynamique SIS :
-  - PMFG       : Planar Maximally Filtered Graph pondéré par |C_ij|
-  - VAR(1)     : coefficients d'un VAR à 1 retard
-  - VAR(13)    : coefficients d'un VAR à 13 retards
-  - Corr thr   : corrélation seuillée par un quantile de |C_ij|
+Four families of networks then feed the SIS dynamics:
+  - PMFG       : Planar Maximally Filtered Graph weighted by |C_ij|
+  - VAR(1)     : coefficients of a 1-lag VAR
+  - VAR(13)    : coefficients of a 13-lag VAR
+  - Corr thr   : correlation thresholded by a quantile of |C_ij|
 
-Toutes les matrices destinées au SIS passent par :func:`prepare_for_sis`
-(valeur absolue, transposition, diagonale nulle).
+Every matrix meant for the SIS goes through :func:`prepare_for_sis`
+(absolute value, transpose, zero diagonal).
 """
 import networkx as nx
 import numpy as np
 
 
 def correlation(data, lag=0):
-    """Matrice de corrélation, éventuellement à un retard donné.
+    """Correlation matrix, optionally at a given lag.
 
     Parameters
     ----------
     data : array-like, shape (T, N)
-        Matrice de séries temporelles.
+        Matrix of time series.
     lag : int
-        Retard entre lignes. 0 = corrélation contemporaine.
+        Lag between rows. 0 = contemporaneous correlation.
 
     Returns
     -------
     ndarray, shape (N, N)
-        Corrélation entre ``data[:-lag]`` et ``data[lag:]`` (pleine si lag=0).
+        Correlation between ``data[:-lag]`` and ``data[lag:]`` (full if lag=0).
     """
     if lag > 0:
         return np.corrcoef(data[:-lag].T, data[lag:].T)[:data.shape[1], data.shape[1]:]
@@ -34,20 +34,20 @@ def correlation(data, lag=0):
 
 
 def build_pmfg(C_abs):
-    """Planar Maximally Filtered Graph pondéré par |C| (3(n-2) arêtes max).
+    """Planar Maximally Filtered Graph weighted by |C| (3(n-2) edges max).
 
-    Les arêtes sont ajoutées par poids décroissant tant que le graphe reste
-    planaire, jusqu'à atteindre 3(n-2) arêtes.
+    Edges are added by decreasing weight as long as the graph stays planar,
+    up to 3(n-2) edges.
 
     Parameters
     ----------
     C_abs : ndarray, shape (n, n)
-        Matrice de similarité positive (typiquement |C_ij|).
+        Positive similarity matrix (typically |C_ij|).
 
     Returns
     -------
     ndarray, shape (n, n)
-        Matrice d'adjacence pondérée symétrique du PMFG.
+        Symmetric weighted adjacency matrix of the PMFG.
     """
     n = C_abs.shape[0]
     G = nx.Graph()
@@ -68,19 +68,19 @@ def build_pmfg(C_abs):
 
 
 def fit_var(arr, lag):
-    """Coefficients VAR(lag) : régression de ``arr[lag:]`` sur ``arr[:-lag]``.
+    """VAR(lag) coefficients: regression of ``arr[lag:]`` on ``arr[:-lag]``.
 
     Parameters
     ----------
     arr : ndarray, shape (T, N)
-        Série temporelle (log-rendements).
+        Time series (log-returns).
     lag : int
-        Nombre de retards.
+        Number of lags.
 
     Returns
     -------
     ndarray, shape (N, N)
-        Bloc de coefficients (la constante est retirée).
+        Coefficient block (the constant term is dropped).
     """
     X = np.column_stack([np.ones(len(arr) - lag), arr[:-lag]])
     B, *_ = np.linalg.lstsq(X, arr[lag:], rcond=None)
@@ -88,17 +88,17 @@ def fit_var(arr, lag):
 
 
 def prepare_for_sis(A_in):
-    """Matrice de contagion prête pour le SIS : |A| transposée, diagonale nulle.
+    """Contagion matrix ready for the SIS: |A| transposed, zero diagonal.
 
     Parameters
     ----------
     A_in : ndarray, shape (N, N)
-        Matrice de contagion brute (peut être signée et asymétrique).
+        Raw contagion matrix (may be signed and asymmetric).
 
     Returns
     -------
     ndarray, shape (N, N)
-        ``|A_in|`` transposée, à diagonale nulle (copie).
+        ``|A_in|`` transposed, with zero diagonal (a copy).
     """
     A = np.abs(A_in.T)
     np.fill_diagonal(A, 0)
@@ -106,21 +106,21 @@ def prepare_for_sis(A_in):
 
 
 def build_filtered_corr(C, q, mask_off):
-    """Corrélation seuillée prête pour le SIS : |C_ij| au-dessus du quantile q.
+    """Thresholded correlation ready for the SIS: |C_ij| above quantile q.
 
     Parameters
     ----------
     C : ndarray, shape (N, N)
-        Matrice de corrélation en valeur absolue (diagonale non utilisée).
+        Absolute-value correlation matrix (diagonal unused).
     q : float
-        Quantile (sur les termes hors diagonale) en deçà duquel on annule.
+        Quantile (over off-diagonal terms) below which entries are zeroed.
     mask_off : ndarray of bool, shape (N, N)
-        Masque hors-diagonale (``~np.eye(N, bool)``).
+        Off-diagonal mask (``~np.eye(N, bool)``).
 
     Returns
     -------
     ndarray, shape (N, N)
-        Matrice seuillée, passée par :func:`prepare_for_sis`.
+        Thresholded matrix, passed through :func:`prepare_for_sis`.
     """
     A = np.where(C >= np.quantile(C[mask_off], q), C, 0.0)
     np.fill_diagonal(A, 0)

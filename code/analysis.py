@@ -1,11 +1,11 @@
-"""Lecture des fits SIS : tableaux R², sélection des périodes et des courbes.
+"""Reading the SIS fits: R² tables, selection of periods and curves.
 
-À partir des dictionnaires de fits produits par :mod:`sis` (``{(pa, pb):
-(cache, fits)}``), ce module :
-  - construit les tableaux récapitulatifs (1 ligne par actif x période) -> CSV ;
-  - sélectionne les périodes portant au moins un bon fit (R² > seuil) ;
-  - rassemble les courbes retenues pour les figures ;
-  - calcule les récapitulatifs de redondance et les résumés de fenêtres.
+From the fit dictionaries produced by :mod:`model` (``{(pa, pb): (cache, fits)}``),
+this section:
+  - builds the summary tables (1 row per asset x period) -> CSV;
+  - selects the periods carrying at least one good fit (R² > threshold);
+  - gathers the retained curves for the figures;
+  - computes the redundancy recaps and the window summaries.
 """
 import numpy as np
 import pandas as pd
@@ -17,25 +17,25 @@ R2_COLS = [f"R2_{m}" for m in config.SIS_MODELS]
 
 
 def crisis_table(windows, period_data, ctx, crisis_map, csv_path=None):
-    """Tableau 1 ligne par (actif, période) en crise ; R² par méthode -> CSV.
+    """Table with 1 row per in-crisis (asset, period); R² per method -> CSV.
 
     Parameters
     ----------
     windows : list of (int, int)
-        Fenêtres globales (intervals_chrono).
+        Global windows (intervals_chrono).
     period_data : dict
-        ``{(pa, pb): (cache, fits)}`` issu de :func:`model.fit_periods`.
+        ``{(pa, pb): (cache, fits)}`` from :func:`model.fit_periods`.
     ctx : SimpleNamespace
-        Contexte (asset_names, all_days, E_daily_all).
+        Context (asset_names, all_days, E_daily_all).
     crisis_map : ndarray of bool
-        Carte de crise par actif (|C|).
+        Per-asset crisis map (|C|).
     csv_path : str or Path or None
-        Si fourni, écrit le tableau en CSV.
+        If provided, write the table to CSV.
 
     Returns
     -------
     DataFrame
-        Trié par période puis R² max décroissant.
+        Sorted by period then decreasing max R².
     """
     rows = []
     for (pa, pb) in windows:
@@ -65,7 +65,7 @@ def crisis_table(windows, period_data, ctx, crisis_map, csv_path=None):
 
 
 def select_periods(windows, period_data, r2_seuil=config.R2_SEUIL):
-    """Périodes portant au moins un fit R² > ``r2_seuil`` (toutes méthodes).
+    """Periods carrying at least one fit with R² > ``r2_seuil`` (any method).
 
     Returns
     -------
@@ -78,21 +78,21 @@ def select_periods(windows, period_data, r2_seuil=config.R2_SEUIL):
 
 
 def collect_by_method(period_data, selection, r2_seuil=config.R2_SEUIL):
-    """Rassemble les courbes (R² > seuil) par méthode pour les figures « 3 vues ».
+    """Gather the curves (R² > threshold) per method for the "3 views" figures.
 
     Parameters
     ----------
     period_data : dict
-        Fits par période.
+        Fits per period.
     selection : list of (int, int)
-        Périodes retenues.
+        Retained periods.
     r2_seuil : float
-        Seuil de sélection des fits.
+        Fit-selection threshold.
 
     Returns
     -------
     dict
-        ``{methode: dict(Es, Xs, E_all, X_all, r2s)}``.
+        ``{method: dict(Es, Xs, E_all, X_all, r2s)}``.
     """
     out = {}
     for m in config.SIS_MODELS:
@@ -110,25 +110,25 @@ def collect_by_method(period_data, selection, r2_seuil=config.R2_SEUIL):
 
 
 def peak_table(peak_rises_list, peak_pd, ctx, r2_seuil=config.R2_SEUIL, csv_path=None):
-    """Tableau des montées de pics (meilleure méthode par actif) + courbes retenues.
+    """Peak-rise table (best method per asset) + retained curves.
 
     Parameters
     ----------
     peak_rises_list : list of (int, int)
-        Montées de pics (creux -> sommet).
+        Peak rises (trough -> summit).
     peak_pd : dict
-        Fits SIS par montée.
+        SIS fits per rise.
     ctx : SimpleNamespace
-        Contexte (asset_names, all_days).
+        Context (asset_names, all_days).
     r2_seuil : float
-        Seuil pour retenir une courbe.
+        Threshold to keep a curve.
     csv_path : str or Path or None
-        Si fourni, écrit le tableau en CSV.
+        If provided, write the table to CSV.
 
     Returns
     -------
     (DataFrame, dict)
-        Le tableau trié par R² max et les courbes retenues
+        The table sorted by max R² and the retained curves
         ``dict(Es, Xs, E_all, X_all, r2s)``.
     """
     records = []
@@ -164,15 +164,16 @@ def peak_table(peak_rises_list, peak_pd, ctx, r2_seuil=config.R2_SEUIL, csv_path
 
 
 def redundancy_recap(period_data, peak_pd, ctx, r2_seuil=config.R2_SEUIL):
-    """Redondance (fits R²>seuil / actifs distincts) par méthode : sans | avec pics.
+    """Redundancy (fits R²>threshold / distinct assets) per method: without | with peaks.
 
     Returns
     -------
     DataFrame
-        Index = méthodes ; colonnes ``fits_sans, actifs_sans, redond_sans,
+        Index = methods; columns ``fits_sans, actifs_sans, redond_sans,
         fits_avec, actifs_avec, redond_avec``.
     """
     def _rows(pdict):
+        """Flatten (method, asset) pairs of the fits above threshold."""
         rows = []
         for (pa, pb), (cache, fits) in pdict.items():
             for m in config.SIS_MODELS:
@@ -184,6 +185,7 @@ def redundancy_recap(period_data, peak_pd, ctx, r2_seuil=config.R2_SEUIL):
     S, A = _rows(period_data), _rows(peak_pd)
 
     def _stat(df, m):
+        """(#fits, #distinct assets, redundancy) for method m."""
         g = df[df.methode == m]
         nu = g.actif.nunique()
         return len(g), nu, (len(g) / nu if nu else 0.0)
@@ -197,14 +199,15 @@ def redundancy_recap(period_data, peak_pd, ctx, r2_seuil=config.R2_SEUIL):
     return pd.DataFrame(out).T
 
 
-# ── Résumés de fenêtres pour la figure de comparaison (cell 27) ───────────────
+# ── Window summaries for the comparison figure (cell 27) ──────────────────────
 def _r2max(fits, gi):
+    """Max R² over the methods for asset ``gi`` (0 if absent)."""
     return max((fits[m][1][gi]["r2"] for m in config.SIS_MODELS if gi in fits[m][1]),
                default=0.0)
 
 
 def window_summaries(windows, pdict, all_days, r2_seuil=config.R2_SEUIL):
-    """Pour chaque fenêtre : actifs en crise + nb de fits R²>seuil (les 2 boucles)."""
+    """Per window: in-crisis assets + number of fits R²>threshold (both loops)."""
     out = []
     for (pa, pb) in windows:
         cache, fits = pdict[(pa, pb)]
@@ -215,57 +218,56 @@ def window_summaries(windows, pdict, all_days, r2_seuil=config.R2_SEUIL):
 
 
 def retain(W, retenue_only=True):
-    """Filtre les fenêtres retenues (>= 1 fit R²>seuil) si ``retenue_only``."""
+    """Filter the retained windows (>= 1 fit R²>threshold) if ``retenue_only``."""
     return [w for w in W if w["n_sup"] > 0] if retenue_only else W
 
 
 def totals(W):
-    """(nb actifs distincts en crise, nb total de fits R²>seuil) sur une liste de fenêtres."""
+    """(#distinct in-crisis assets, total #fits R²>threshold) over a list of windows."""
     crise = set().union(*[w["cache"] for w in W]) if W else set()
     return len(crise), sum(w["n_sup"] for w in W)
 
 
-# ═══════════════════════════ Réflexivité endo/exo (ex-endo_exo.py) ═══════════════════════════
+# ═══════════════════════════ Endo/exo reflexivity (was endo_exo.py) ═══════════════════════════
 
-"""Score endo/exo reproductible — ratio de branchement (réflexivité) par période.
+"""Reproducible endo/exo score — branching ratio (reflexivity) per period.
 
-Remplace l'étiquette « exogène/endogène » posée à la main par un **score calculé
-identiquement sur toutes les périodes**, tiré de la littérature sur les chocs
-endogènes vs exogènes des marchés (Filimonov & Sornette 2012 ; Hardiman &
-Bouchaud 2014).
+Replaces the hand-set "exogenous/endogenous" label with a **score computed
+identically over every period**, taken from the literature on endogenous vs
+exogenous market shocks (Filimonov & Sornette 2012; Hardiman & Bouchaud 2014).
 
-Idée
+Idea
 ----
-Le **ratio de branchement** ``n`` d'un processus auto-excitant de Hawkes quantifie
-la part d'activité **ENDOGENE** (chaque mouvement en déclenche d'autres — cascade
-interne, réflexivité) par rapport à l'activité **EXOGENE** (chocs externes qui
-arrivent « de l'extérieur »). ``n → 1`` : marché quasi-critique, très réflexif ;
-``n → 0`` : activité poissonienne dirigée par des chocs externes.
+The **branching ratio** ``n`` of a self-exciting Hawkes process quantifies the
+share of **ENDOGENOUS** activity (each move triggering others — internal cascade,
+reflexivity) relative to the **EXOGENOUS** activity (external shocks arriving
+"from outside"). ``n → 1``: near-critical, highly reflexive market;
+``n → 0``: Poisson activity driven by external shocks.
 
-Estimateur *model-independent* (Hardiman & Bouchaud 2014) : pour un Hawkes
-stationnaire, l'**indice de dispersion** (Fano) des comptages d'événements dans
-des bins de même durée tend, à grande fenêtre, vers ::
+*Model-independent* estimator (Hardiman & Bouchaud 2014): for a stationary
+Hawkes process, the **dispersion index** (Fano) of the event counts in bins of
+equal duration tends, at large windows, towards ::
 
-    F = Var[N] / E[N]  ->  1 / (1 - n)^2      d'où   n = 1 - 1/sqrt(F).
+    F = Var[N] / E[N]  ->  1 / (1 - n)^2      hence   n = 1 - 1/sqrt(F).
 
-Il ne demande que la moyenne et la variance des comptages : pas d'ajustement de
-vraisemblance fragile, donc stable sur des fenêtres courtes.
+It only needs the mean and variance of the counts: no fragile likelihood fit, so
+it is stable on short windows.
 
-Recette (identique pour chaque période)
----------------------------------------
-- **Événement** = « saut » d'un actif : ``|r_{i,t}| > k · médiane(|r_i|)``, le
-  seuil étant propre à chaque actif (invariant d'échelle) et estimé sur tout
-  l'échantillon -> même règle partout. ``k = 3`` par défaut.
-- **Comptage** = nombre de sauts d'actifs, agrégé **par jour** (bin = 1 jour).
-- ``n = 1 - 1/sqrt(Fano)`` sur les comptages journaliers de la fenêtre.
+Recipe (identical for each period)
+----------------------------------
+- **Event** = "jump" of an asset: ``|r_{i,t}| > k · median(|r_i|)``, the threshold
+  being per-asset (scale-invariant) and estimated over the whole sample -> same
+  rule everywhere. ``k = 3`` by default.
+- **Count** = number of asset jumps, aggregated **per day** (bin = 1 day).
+- ``n = 1 - 1/sqrt(Fano)`` over the window's daily counts.
 
-Le **classement** des périodes est invariant au seuil ``k`` (rho de Spearman ≈ 1
-pour ``k ∈ [2.5, 3.5]``) et à la taille de bin ≥ 1 jour. À l'échelle intra-barre
-(30 min), ``n ≈ 0.84`` pour *toutes* les fenêtres : c'est la « criticité
-apparente » décrite par Hardiman & Bouchaud — c'est au pas **journalier** que le
-branching ratio différencie les crises.
+The **ranking** of the periods is invariant to the threshold ``k`` (Spearman rho
+≈ 1 for ``k ∈ [2.5, 3.5]``) and to the bin size >= 1 day. At the intra-bar scale
+(30 min), ``n ≈ 0.84`` for *all* windows: this is the "apparent criticality"
+described by Hardiman & Bouchaud — it is at the **daily** step that the branching
+ratio distinguishes the crises.
 
-Références
+References
 ----------
 V. Filimonov, D. Sornette, *Quantifying reflexivity in financial markets*,
 Phys. Rev. E **85**, 056108 (2012).
@@ -275,24 +277,24 @@ self-exciting Hawkes process*, Phys. Rev. E **90**, 062807 (2014).
 import numpy as np
 import pandas as pd
 
-JUMP_K = 3.0        # un actif « saute » si |r| > JUMP_K x sa médiane de |r|
+JUMP_K = 3.0        # an asset "jumps" if |r| > JUMP_K x its median of |r|
 
 
 def market_jump_activity(data, k=JUMP_K):
-    """Activité de saut du marché, barre par barre.
+    """Market jump activity, bar by bar.
 
     Parameters
     ----------
     data : DataFrame, shape (T, N)
-        Log-rendements intraday.
+        Intraday log-returns.
     k : float
-        Un actif saute à la barre ``t`` si ``|r_{i,t}| > k · médiane(|r_i|)``
-        (échelle propre à chaque actif, estimée sur tout l'échantillon).
+        An asset jumps at bar ``t`` if ``|r_{i,t}| > k · median(|r_i|)``
+        (per-asset scale, estimated over the whole sample).
 
     Returns
     -------
     ndarray, shape (T,)
-        Nombre d'actifs qui sautent à chaque barre.
+        Number of jumping assets at each bar.
     """
     R = np.abs(np.asarray(data.values, float))
     med = np.nanmedian(R, axis=0)
@@ -301,28 +303,27 @@ def market_jump_activity(data, k=JUMP_K):
 
 
 def _day_of_bar(data, all_days):
-    """Index de jour (dans ``all_days``) de chaque barre de ``data``."""
+    """Day index (in ``all_days``) of each bar of ``data``."""
     bar_day = pd.to_datetime(data.index).normalize().values
     return np.searchsorted(np.asarray(all_days), bar_day, side="right") - 1
 
 
 def branching_ratio(counts):
-    """Ratio de branchement ``n = 1 - 1/sqrt(Var/Mean)`` sur des comptages par bin.
+    """Branching ratio ``n = 1 - 1/sqrt(Var/Mean)`` over per-bin counts.
 
-    Estimateur *model-independent* de Hardiman & Bouchaud (2014) : pour un
-    processus de Hawkes stationnaire, l'indice de dispersion des comptages tend
-    vers ``1/(1-n)^2``.
+    *Model-independent* estimator of Hardiman & Bouchaud (2014): for a stationary
+    Hawkes process, the dispersion index of the counts tends to ``1/(1-n)^2``.
 
     Parameters
     ----------
     counts : array-like
-        Nombre d'événements par bin de temps (bins de même durée).
+        Number of events per time bin (bins of equal duration).
 
     Returns
     -------
     float
-        ``n`` dans ``[0, 1)`` ; ``nan`` si moins de 5 bins ou moyenne nulle.
-        Sous-dispersion (``F <= 1``, cas ~poissonien) -> ``0``.
+        ``n`` in ``[0, 1)``; ``nan`` if fewer than 5 bins or zero mean.
+        Under-dispersion (``F <= 1``, ~Poisson case) -> ``0``.
     """
     c = np.asarray(counts, float)
     c = c[np.isfinite(c)]
@@ -333,7 +334,7 @@ def branching_ratio(counts):
 
 
 def _daily_counts(activity, day_of_bar, a, b):
-    """Comptages de sauts agrégés par jour sur la fenêtre de jours ``[a, b]``."""
+    """Jump counts aggregated per day over the day window ``[a, b]``."""
     m = (day_of_bar >= a) & (day_of_bar <= b)
     if not m.any():
         return np.array([])
@@ -341,30 +342,30 @@ def _daily_counts(activity, day_of_bar, a, b):
 
 
 def reflexivity_by_period(ctx, periods_list, k=JUMP_K, n_boot=2000, seed=0):
-    """Ratio de branchement ``n`` (réflexivité) par période, avec IC bootstrap.
+    """Branching ratio ``n`` (reflexivity) per period, with bootstrap CI.
 
-    Calculé identiquement sur chaque fenêtre : événements = sauts d'actifs
-    (``|r| > k · médiane``), bin = 1 jour, ``n = 1 - 1/sqrt(Fano)``.
+    Computed identically over each window: events = asset jumps
+    (``|r| > k · median``), bin = 1 day, ``n = 1 - 1/sqrt(Fano)``.
 
     Parameters
     ----------
     ctx : SimpleNamespace
-        Contexte partagé (``data``, ``all_days``).
+        Shared context (``data``, ``all_days``).
     periods_list : list of (int, int)
-        Fenêtres ``(début, fin)`` en index de jour (typiquement ``peak_rises``).
+        Windows ``(start, end)`` in day indices (typically ``peak_rises``).
     k : float
-        Seuil de saut (x médiane de ``|r|`` par actif).
+        Jump threshold (x per-asset median of ``|r|``).
     n_boot : int
-        Nombre de rééchantillonnages bootstrap des comptages journaliers (IC 95 %).
+        Number of bootstrap resamples of the daily counts (95% CI).
     seed : int
-        Graine du générateur pseudo-aléatoire.
+        Seed of the pseudo-random generator.
 
     Returns
     -------
     DataFrame
-        Colonnes ``periode, n, n_lo, n_hi, n_sd, Fano, n_days, act_per_day``
-        (``n_sd`` = écart-type bootstrap de ``n`` ; une ligne par période, ordre
-        chronologique d'entrée).
+        Columns ``periode, n, n_lo, n_hi, n_sd, Fano, n_days, act_per_day``
+        (``n_sd`` = bootstrap std of ``n``; one row per period, chronological
+        input order).
     """
     all_days = np.asarray(pd.to_datetime(ctx.all_days))
     activity = market_jump_activity(ctx.data, k)
@@ -390,25 +391,25 @@ def reflexivity_by_period(ctx, periods_list, k=JUMP_K, n_boot=2000, seed=0):
 
 
 def reflexivity_series(ctx, win_days=21, k=JUMP_K):
-    """Série glissante du ratio de branchement ``n`` (bin = jour).
+    """Sliding series of the branching ratio ``n`` (bin = day).
 
-    ``n`` estimé sur les ``win_days`` derniers jours à chaque date (≈ 1 mois,
-    cohérent avec ``WINDOW_SPEC``). Sert à tracer la réflexivité dans le temps,
-    à la façon du diagnostic spectral λ_max/⟨λ⟩.
+    ``n`` estimated on the last ``win_days`` days at each date (≈ 1 month,
+    consistent with ``WINDOW_SPEC``). Used to plot reflexivity over time, in the
+    style of the spectral diagnostic λ_max/⟨λ⟩.
 
     Parameters
     ----------
     ctx : SimpleNamespace
-        Contexte partagé (``data``, ``all_days``).
+        Shared context (``data``, ``all_days``).
     win_days : int
-        Largeur de la fenêtre glissante, en jours.
+        Width of the sliding window, in days.
     k : float
-        Seuil de saut (x médiane de ``|r|`` par actif).
+        Jump threshold (x per-asset median of ``|r|``).
 
     Returns
     -------
     Series
-        ``n`` indexé par date (``nan`` avant la première fenêtre complète).
+        ``n`` indexed by date (``nan`` before the first complete window).
     """
     all_days = np.asarray(pd.to_datetime(ctx.all_days))
     activity = market_jump_activity(ctx.data, k)
@@ -422,24 +423,24 @@ def reflexivity_series(ctx, win_days=21, k=JUMP_K):
 
 
 def endo_exo_index(n_values, k=5):
-    """Indice endo/exo entier de 1 à ``k`` par quantiles du score ``n``.
+    """Integer endo/exo index from 1 to ``k`` by quantiles of the score ``n``.
 
-    Le score ``n`` étant élevé et resserré partout (marché quasi-critique),
-    l'indice est **comparatif** : il répartit les périodes en ``k`` groupes de
-    tailles ~égales par rang du score. ``1`` = le plus **exogène** (``n`` le plus
-    faible), ``k`` = le plus **endogène** (``n`` le plus fort).
+    Since the score ``n`` is high and tight everywhere (near-critical market), the
+    index is **comparative**: it splits the periods into ``k`` groups of ~equal
+    sizes by score rank. ``1`` = most **exogenous** (lowest ``n``), ``k`` = most
+    **endogenous** (highest ``n``).
 
     Parameters
     ----------
     n_values : array-like
-        Les valeurs de ``n`` des périodes.
+        The ``n`` values of the periods.
     k : int
-        Nombre de niveaux de l'échelle (5 par défaut).
+        Number of levels of the scale (5 by default).
 
     Returns
     -------
     list of int
-        L'indice ``1..k`` de chaque période (``0`` si ``n`` est ``nan``).
+        The index ``1..k`` of each period (``0`` if ``n`` is ``nan``).
     """
     n = pd.Series(n_values, dtype=float)
     ranks = n.rank(method="average")
@@ -448,21 +449,21 @@ def endo_exo_index(n_values, k=5):
 
 
 def tag_from_terciles(n_values):
-    """Étiquette comparative endo/exo par terciles du score ``n`` (17 périodes).
+    """Comparative endo/exo label by terciles of the score ``n`` (17 periods).
 
-    Le score ``n`` étant élevé partout (marché quasi-critique), l'étiquette est
-    **comparative** : elle situe chaque période par rapport aux autres.
+    Since the score ``n`` is high everywhere (near-critical market), the label is
+    **comparative**: it situates each period relative to the others.
 
     Parameters
     ----------
     n_values : array-like
-        Les valeurs de ``n`` des périodes.
+        The ``n`` values of the periods.
 
     Returns
     -------
     list of str
         ``'endogène (réflexivité forte)'`` / ``'intermédiaire'`` /
-        ``'exogène (réflexivité faible)'`` selon le tercile.
+        ``'exogène (réflexivité faible)'`` depending on the tercile.
     """
     n = np.asarray(n_values, float)
     q1, q2 = np.nanquantile(n, [1 / 3, 2 / 3])
@@ -479,16 +480,16 @@ def tag_from_terciles(n_values):
     return out
 
 
-# ═══════════════════════════ Modèle nul (ex-null_random_data.py) ═══════════════════════════
+# ═══════════════════════════ Null model (was null_random_data.py) ═══════════════════════════
 
-"""Null model 'donnees random, memes matrices' : block-bootstrap des rendements,
-re-detection + fit SIS avec les VRAIES matrices A, comptage des courbes R2>seuil.
+"""Null model 'random data, same matrices': block-bootstrap of the returns,
+re-detection + SIS fit with the REAL A matrices, count of the R2>threshold curves.
 
-Le block-bootstrap conserve la correlation contemporaine (donc ~autant de courbes
-detectees) mais casse l'ordre temporel -> teste si la dynamique reelle compte.
-iid / phase-rand detruisent la correlation (0 courbe), confirmes a part.
+The block-bootstrap keeps the contemporaneous correlation (so ~as many detected
+curves) but breaks the temporal order -> tests whether the real dynamics matter.
+iid / phase-rand destroy the correlation (0 curve), confirmed separately.
 
-Sortie : cache/null_random_blockboot.pkl (real_counts, null_counts par methode).
+Output: cache/null_random_blockboot.pkl (real_counts, null_counts per method).
 """
 import sys, pickle, numpy as np, pandas as pd
 from types import SimpleNamespace
@@ -499,13 +500,13 @@ import config
 import data as datamod
 import model
 
-# Contexte chargé à la demande (PAS à l'import de analysis) :
+# Context loaded on demand (NOT at import of analysis):
 N = MASK = SIS_MODELS = A_SIS = REALVALS = IDX = COLS = None
 R2 = config.R2_SEUIL
 
 
 def _ensure_null():
-    """Charge le contexte du modèle nul au premier appel (globals du module)."""
+    """Load the null-model context on first call (module globals)."""
     global N, MASK, SIS_MODELS, A_SIS, REALVALS, IDX, COLS
     if N is not None:
         return
@@ -518,7 +519,7 @@ def _ensure_null():
 
 
 def _light_base(vals):
-    """jours, mc journalier, E_i journalier depuis un tableau (T, N) aligne sur IDX."""
+    """days, daily mc, daily E_i from a (T, N) array aligned on IDX."""
     df = pd.DataFrame(vals, index=IDX, columns=COLS)
     day = np.array([t.date() for t in IDX])
     days = np.array(sorted(set(day)))
@@ -533,7 +534,7 @@ def _light_base(vals):
 
 
 def _count(vals):
-    """Nb de courbes R2>seuil par methode (vraies matrices A, integrate_xscan)."""
+    """Number of R2>threshold curves per method (real A matrices, integrate_xscan)."""
     _ensure_null()
     df, days, mc, E = _light_base(vals)
     cm = model._crisis_map_from(E)
@@ -556,17 +557,19 @@ def _count(vals):
 
 
 def _block_boot(seed, block=20):
+    """Block-bootstrap of the real returns (keeps the contemporaneous correlation)."""
     _ensure_null()
     rng = np.random.default_rng(seed)
     T = REALVALS.shape[0]; nb = T // block
     starts = rng.integers(0, T - block + 1, size=nb)
     out = np.vstack([REALVALS[s:s + block] for s in starts])[:T]
-    if out.shape[0] < T:                      # complete a T lignes
+    if out.shape[0] < T:                      # complete to T rows
         out = np.vstack([out, REALVALS[:T - out.shape[0]]])
     return out
 
 
 def _one_null(seed):
+    """One null realisation: block-bootstrap then count."""
     return _count(_block_boot(seed))
 
 
@@ -590,21 +593,21 @@ if __name__ == '__main__':
     print('\n-> cache/null_random_blockboot.pkl')
 
 
-# ═══════════════════════════ Calibration ξ_emp (ex-proxy.py) ═══════════════════════════
+# ═══════════════════════════ ξ_emp calibration (was proxy.py) ═══════════════════════════
 
-"""Calibration de l'énergie de corrélation E_i en probabilité de stress ξ_emp.
+"""Calibration of the correlation energy E_i into a stress probability ξ_emp.
 
-Fonctions utilitaires consommées par les notebooks (voir notebooks/article.ipynb).
+Utility functions consumed by the notebooks (see notebooks/article.ipynb).
 
-Le SIS produit x_i(t) ∈ [0, 1] = probabilité que l'actif i soit « infecté ». Pour
-le comparer à un observable de **même nature**, on calibre E_i (énergie de
-corrélation, ∈ [0, 1] mais pas une probabilité) en probabilité de rendement
-extrême, via un indicateur indépendant I_i(t) = 1(|r_i(t)| > q_i^90) :
+The SIS produces x_i(t) ∈ [0, 1] = probability that asset i is "infected". To
+compare it against an observable of the **same nature**, we calibrate E_i
+(correlation energy, ∈ [0, 1] but not a probability) into a probability of
+extreme return, via an independent indicator I_i(t) = 1(|r_i(t)| > q_i^90):
 
-    ξ_emp(E-bin) = P(I=1 | E ∈ bin) = #{I=1 dans le bin} / #{obs dans le bin}.
+    ξ_emp(E-bin) = P(I=1 | E ∈ bin) = #{I=1 in the bin} / #{obs in the bin}.
 
-`build_mapping` renvoie la fonction f : E ↦ P(stress | E) (isotonique/logistique),
-et `map_energy(E, f)` mappe n'importe quel profil E_i(t) en ξ_emp(t) = f(E_i(t)).
+`build_mapping` returns the function f : E ↦ P(stress | E) (monotone/smooth), and
+`map_energy(E, f)` maps any profile E_i(t) into ξ_emp(t) = f(E_i(t)).
 """
 from types import SimpleNamespace
 
@@ -612,10 +615,10 @@ import numpy as np
 
 
 def daily_log_returns(data, all_days):
-    """Log-rendements journaliers (N, n_days) alignés sur ``all_days``.
+    """Daily log-returns (N, n_days) aligned on ``all_days``.
 
-    Les log-rendements intraday 30-min étant additifs, leur somme sur un jour
-    donne le log-rendement close-to-close de ce jour.
+    Since the intraday 30-min log-returns are additive, their sum over a day
+    gives that day's close-to-close log-return.
     """
     df = data.copy()
     df["day"] = df.index.date
@@ -623,7 +626,7 @@ def daily_log_returns(data, all_days):
 
 
 def extreme_indicator(daily_ret, q=0.90):
-    """I_i(t) = 1(|r_i(t)| > q_i^q), seuil q **par actif** (NaN où r manquant)."""
+    """I_i(t) = 1(|r_i(t)| > q_i^q), threshold q **per asset** (NaN where r missing)."""
     a = np.abs(daily_ret)
     thr = np.nanquantile(a, q, axis=1, keepdims=True)
     I = (a > thr).astype(float)
@@ -632,16 +635,16 @@ def extreme_indicator(daily_ret, q=0.90):
 
 
 def pairs(E, I):
-    """Aplati les paires valides (E_i(t), I_i(t)) → deux vecteurs 1D."""
+    """Flatten the valid pairs (E_i(t), I_i(t)) → two 1D vectors."""
     ok = np.isfinite(E) & np.isfinite(I)
     return E[ok], I[ok].astype(float)
 
 
 def calibration_curve(Ev, Iv, bin_width=0.05, min_count=50):
-    """ξ_emp(E-bin) = P(I=1 | E ∈ bin) par casiers de largeur fixe.
+    """ξ_emp(E-bin) = P(I=1 | E ∈ bin) by fixed-width bins.
 
-    Returns un dict ``centers, p, n, se`` (se = écart-type binomial), les casiers
-    d'effectif < ``min_count`` étant écartés.
+    Returns a dict ``centers, p, n, se`` (se = binomial std), the bins with count
+    < ``min_count`` being dropped.
     """
     edges = np.arange(0.0, Ev.max() + bin_width, bin_width)
     idx = np.digitize(Ev, edges) - 1
@@ -657,7 +660,7 @@ def calibration_curve(Ev, Iv, bin_width=0.05, min_count=50):
 
 
 def crossing(x, y, level):
-    """Premier x où y traverse ``level`` (interpolation linéaire), sinon None."""
+    """First x where y crosses ``level`` (linear interpolation), else None."""
     d = np.asarray(y) - level
     s = np.where(np.diff(np.sign(d)) != 0)[0]
     if len(s) == 0:
@@ -666,12 +669,15 @@ def crossing(x, y, level):
     return float(x[i] - d[i] * (x[i + 1] - x[i]) / (d[i + 1] - d[i]))
 
 
-def build_mapping(ctx, q=0.90, kind="isotonic"):
-    """Indicateur + paires + courbe + fonctions de mapping E ↦ P(stress|E).
+def build_mapping(ctx, q=0.90, kind="monotone"):
+    """Indicator + pairs + curve + mapping functions E ↦ P(stress|E).
 
-    Returns un ``SimpleNamespace`` : ``f`` (E→proba, selon ``kind``), ``iso`` /
-    ``log`` (les deux mappings), ``curve``, ``Ev`` / ``Iv`` (paires),
-    ``marginal`` (P(I=1) global), ``q``.
+    ``kind`` : ``"monotone"`` (hugs the data, isotonic regression) or
+    ``"smooth"`` (smooth, logistic regression).
+
+    Returns a ``SimpleNamespace``: ``f`` (E→prob, according to ``kind``),
+    ``monotone`` / ``smooth`` (the two mappings), ``curve``, ``Ev`` / ``Iv``
+    (pairs), ``marginal`` (global P(I=1)), ``q``.
     """
     from sklearn.isotonic import IsotonicRegression
     from sklearn.linear_model import LogisticRegression
@@ -683,16 +689,17 @@ def build_mapping(ctx, q=0.90, kind="isotonic"):
 
     ir = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0).fit(Ev, Iv)
     lr = LogisticRegression().fit(Ev.reshape(-1, 1), Iv.astype(int))
-    iso = lambda e: ir.predict(np.ravel(e))
-    log = lambda e: lr.predict_proba(np.ravel(e).reshape(-1, 1))[:, 1]
+    monotone = lambda e: ir.predict(np.ravel(e))
+    smooth = lambda e: lr.predict_proba(np.ravel(e).reshape(-1, 1))[:, 1]
 
-    return SimpleNamespace(f=iso if kind == "isotonic" else log, iso=iso, log=log,
+    return SimpleNamespace(f=monotone if kind == "monotone" else smooth,
+                           monotone=monotone, smooth=smooth,
                            curve=calibration_curve(Ev, Iv), Ev=Ev, Iv=Iv,
                            marginal=float(Iv.mean()), q=q)
 
 
 def map_energy(E, f):
-    """Applique la calibration f à un tableau E (forme et NaN préservés)."""
+    """Apply the calibration f to an array E (shape and NaN preserved)."""
     E = np.asarray(E, dtype=float)
     out = np.full(E.shape, np.nan)
     m = np.isfinite(E)
@@ -701,13 +708,13 @@ def map_energy(E, f):
     return out
 
 
-# ═══════════════════════════ Orchestration (ex-pipeline.py) ═══════════════════════════
+# ═══════════════════════════ Orchestration (was pipeline.py) ═══════════════════════════
 
-"""Orchestration : enchaîne données → périodes → SIS → sélection.
+"""Orchestration: chains data → periods → SIS → selection.
 
-Couche fine et sans tracé, partagée par tous les scripts ``run_*.py``. Chaque
-fonction renvoie des objets déjà mis en cache par les modules sous-jacents, donc
-les appeler plusieurs fois (depuis des scripts différents) ne recalcule rien.
+A thin, plot-free layer shared by all the ``run_*.py`` scripts. Each function
+returns objects already cached by the underlying modules, so calling them several
+times (from different scripts) recomputes nothing.
 """
 import numpy as np
 from scipy.stats import linregress
@@ -719,7 +726,7 @@ from networks import build_filtered_corr, fit_var, prepare_for_sis
 
 
 def load_periods(ctx):
-    """Boucle 1 (fenêtres globales) + boucle 2 (carte de crise par actif, |C|).
+    """Loop 1 (global windows) + loop 2 (per-asset crisis map, |C|).
 
     Returns
     -------
@@ -732,12 +739,12 @@ def load_periods(ctx):
 
 
 def fit_main(ctx, intervals_chrono, crisis_map):
-    """Fits SIS sur les fenêtres croissantes (|C|) + périodes sélectionnées.
+    """SIS fits on the rising windows (|C|) + selected periods.
 
     Returns
     -------
     dict
-        ``period_data`` (cache) et ``selected`` (périodes avec >=1 fit R²>seuil).
+        ``period_data`` (cache) and ``selected`` (periods with >=1 fit R²>threshold).
     """
     fc = model.make_fit_context(ctx, crisis_map)
     sig = model.sig_period_data(ctx.N, intervals_chrono, crisis_map)
@@ -747,12 +754,12 @@ def fit_main(ctx, intervals_chrono, crisis_map):
 
 
 def fit_peaks(ctx, crisis_map):
-    """Détection par pics + montées + fits SIS sur les montées.
+    """Peak detection + rises + SIS fits on the rises.
 
     Returns
     -------
     dict
-        ``peak`` (sortie de detect_peaks), ``peak_rises``, ``peak_pd`` (cache).
+        ``peak`` (output of detect_peaks), ``peak_rises``, ``peak_pd`` (cache).
     """
     peak = model.detect_peaks(ctx.mc_all, ctx.mean_mc)
     pr = model.peak_rises(peak["peak_intervals"], peak["mc_s"])
@@ -763,7 +770,7 @@ def fit_peaks(ctx, crisis_map):
 
 
 def fit_signed(ctx):
-    """Pipeline « sans valeur absolue » : détection signée + fits SIS.
+    """"Without absolute value" pipeline: signed detection + SIS fits.
 
     Returns
     -------
@@ -784,18 +791,18 @@ def fit_signed(ctx):
 
 
 def spectral(ctx):
-    """Diagnostic spectral λ_max/⟨λ⟩ + pics + périodes 'mix' (mis en cache)."""
+    """Spectral diagnostic λ_max/⟨λ⟩ + peaks + 'mix' periods (cached)."""
     diag = model.spectral_diagnostics(ctx.data, ctx.N)
     return dict(diag=diag, lam_dates=model.lambda_peaks(diag),
                 mix_periods=model.mix_periods(diag))
 
 
-# ── Expériences ───────────────────────────────────────────────────────────────
+# ── Experiments ───────────────────────────────────────────────────────────────
 def _corr_thr_fits(q, ctx, intervals_chrono, period_data):
-    """Fits 'Corr thr' au quantile q sur tous les actifs en crise (toutes périodes).
+    """'Corr thr' fits at quantile q over all in-crisis assets (all periods).
 
-    Réutilise les conditions initiales déjà en cache (``period_data[...][0]``),
-    indépendantes de q ; seule la matrice 'Corr thr' dépend de q.
+    Reuses the already-cached initial conditions (``period_data[...][0]``),
+    independent of q; only the 'Corr thr' matrix depends on q.
     """
     A_q = build_filtered_corr(ctx.C_full, q, ctx.mask_off)
     Es, Xs, E_all, X_all, r2s, keys = [], [], [], [], [], []
@@ -815,7 +822,7 @@ def _corr_thr_fits(q, ctx, intervals_chrono, period_data):
 
 
 def run_qsweep(ctx, intervals_chrono, crisis_map, period_data):
-    """Balayage du seuil q de 'Corr thr' (parallélisé, mis en cache).
+    """Sweep of the 'Corr thr' q-threshold (parallelised, cached).
 
     Returns
     -------
@@ -829,6 +836,7 @@ def run_qsweep(ctx, intervals_chrono, crisis_map, period_data):
                  config.B_FIT, config.R_FIT, config.T_LONG, config.TOL_EQ, "fast")
 
     def _compute():
+        """Run the q-sweep in parallel and index by q."""
         res = Parallel(n_jobs=min(len(config.Q_SWEEP), config.N_JOBS))(
             delayed(_corr_thr_fits)(q, ctx, intervals_chrono, period_data)
             for q in config.Q_SWEEP)
@@ -838,29 +846,29 @@ def run_qsweep(ctx, intervals_chrono, crisis_map, period_data):
 
 
 def _br_counts(B, R, caches, A_sis, r2_seuil):
-    """Pour un couple (B, R) : par méthode, nb de fits et d'actifs distincts R²>seuil.
+    """For a pair (B, R): per method, number of fits and distinct assets R²>threshold.
 
-    Réutilise les conditions initiales déjà en cache (``caches``), qui ne dépendent
-    pas de (B, R) ; seule l'intégration SIS en dépend.
+    Reuses the already-cached initial conditions (``caches``), which do not depend
+    on (B, R); only the SIS integration does.
 
     Parameters
     ----------
     B, R : float
-        Taux de récupération et d'infection.
+        Recovery and infection rates.
     caches : list of dict
-        Une entrée ``cache`` (gi -> dict(E_i, x0, n_days)) par fenêtre.
+        One ``cache`` entry (gi -> dict(E_i, x0, n_days)) per window.
     A_sis : dict
-        Matrices de contagion par méthode.
+        Contagion matrices per method.
     r2_seuil : float
-        Seuil de sélection des fits.
+        Fit-selection threshold.
 
     Returns
     -------
     dict
-        ``{methode: dict(n_fits, n_assets, med_r2_all, mean_r2_all, med_r2_sel,
-        agg_r2_all, agg_r2_sel)}``. ``med_*``/``mean_*`` sont des R² médians/moyens par
-        courbe ; ``agg_*`` est le R² de la régression agrégée sur le nuage poolé E↔x
-        (``_sel`` = fits R²>seuil, ``_all`` = tous ; ``nan`` si vide).
+        ``{method: dict(n_fits, n_assets, med_r2_all, mean_r2_all, med_r2_sel,
+        agg_r2_all, agg_r2_sel)}``. ``med_*``/``mean_*`` are median/mean per-curve
+        R²; ``agg_*`` is the R² of the aggregate regression on the pooled E↔x cloud
+        (``_sel`` = fits R²>threshold, ``_all`` = all; ``nan`` if empty).
     """
     fits = {m: 0 for m in config.SIS_MODELS}
     assets = {m: set() for m in config.SIS_MODELS}
@@ -877,7 +885,7 @@ def _br_counts(B, R, caches, A_sis, r2_seuil):
                 ok = ~np.isnan(E_i)
                 if ok.sum() < 3:
                     continue
-                xt = model.integrate_xscan(d, gi, A, B=B, R=R)   # intégrateur léger (balayage)
+                xt = model.integrate_xscan(d, gi, A, B=B, R=R)   # lightweight integrator (sweep)
                 r2 = linregress(E_i[ok], xt[ok]).rvalue ** 2
                 r2all[m].append(r2)
                 Es[m].append(E_i[ok])
@@ -889,6 +897,7 @@ def _br_counts(B, R, caches, A_sis, r2_seuil):
                     Xsel[m].append(xt[ok])
 
     def _agg(Ed, Xd):
+        """Aggregate R² of the pooled (E, x) cloud (nan if empty)."""
         if not Ed:
             return np.nan
         return float(linregress(np.concatenate(Ed), np.concatenate(Xd)).rvalue ** 2)
@@ -906,25 +915,25 @@ def _br_counts(B, R, caches, A_sis, r2_seuil):
 
 
 def run_br_scan(ctx, windows, crisis_map, period_data, B_grid, R_grid):
-    """Balaye la grille (B, R) -> actifs/fits retenus par méthode (parallélisé, caché).
+    """Sweep the (B, R) grid -> retained assets/fits per method (parallelised, cached).
 
     Parameters
     ----------
     ctx : SimpleNamespace
-        Contexte (pour ``A_sis``).
+        Context (for ``A_sis``).
     windows : list of (int, int)
-        Fenêtres sur lesquelles compter (typiquement ``intervals_chrono``).
+        Windows to count over (typically ``intervals_chrono``).
     crisis_map : ndarray of bool
-        Carte de crise (n'entre que dans la signature de cache).
+        Crisis map (only enters the cache signature).
     period_data : dict
-        Fits déjà calculés (on n'en réutilise que les conditions initiales).
+        Already-computed fits (only the initial conditions are reused).
     B_grid, R_grid : array-like
-        Valeurs de B et de R balayées.
+        Swept values of B and R.
 
     Returns
     -------
     dict
-        ``{(B, R): {methode: dict(n_fits, n_assets, med_r2_all, mean_r2_all, med_r2_sel)}}``.
+        ``{(B, R): {method: dict(n_fits, n_assets, med_r2_all, mean_r2_all, med_r2_sel)}}``.
     """
     import os
     from joblib import Parallel, delayed
@@ -935,6 +944,7 @@ def run_br_scan(ctx, windows, crisis_map, period_data, B_grid, R_grid):
                  config.CORR_THRESHOLD, config.T_LONG, config.TOL_EQ, config.R2_SEUIL, "br_fast_r2")
 
     def _compute():
+        """Run the (B, R) scan in parallel and index by pair."""
         res = Parallel(n_jobs=min(len(pairs), config.N_JOBS))(
             delayed(_br_counts)(B, R, caches, ctx.A_sis, config.R2_SEUIL) for (B, R) in pairs)
         return {p: r for p, r in zip(pairs, res)}
@@ -943,7 +953,7 @@ def run_br_scan(ctx, windows, crisis_map, period_data, B_grid, R_grid):
 
 
 def _r2_for_A(A_model, ctx, selected, period_data):
-    """R² agrégés (x_i SIS vs E_i) sur 'selected' pour une matrice de contagion."""
+    """Aggregate R² (x_i SIS vs E_i) over 'selected' for a contagion matrix."""
     r2s, Ea, Xa = [], [], []
     for (pa, pb) in selected:
         cache = period_data[(pa, pb)][0]
@@ -962,18 +972,19 @@ def _r2_for_A(A_model, ctx, selected, period_data):
 
 
 def run_lag_scan(ctx, selected, period_data):
-    """Balayage des lags VAR -> qualité du fit SIS (mis en cache).
+    """VAR-lag sweep -> SIS fit quality (cached).
 
     Returns
     -------
     DataFrame
-        Index = lag VAR ; colonnes ``n, n_sup, R2_moyen, R2_agrege``.
+        Index = VAR lag; columns ``n, n_sup, R2_moyen, R2_agrege``.
     """
     import pandas as pd
 
     lags = config.LAG_SCAN
 
     def _scan():
+        """SIS fit quality for each VAR lag."""
         return {d: _r2_for_A(prepare_for_sis(np.abs(fit_var(ctx.data.values, d).T)),
                              ctx, selected, period_data) for d in lags}
 

@@ -1,12 +1,12 @@
-"""Figures du pipeline — la brique « un qui trace les graphiques ».
+"""Pipeline figures — the "one that draws the plots" building block.
 
-Backend non interactif (Agg) : chaque fonction construit une figure et la sauve
-dans ``Fig/`` (PNG), puis la ferme. Aucune fenêtre n'est ouverte, les scripts
-sont donc exécutables sans affichage.
+Non-interactive backend (Agg): each function builds a figure and saves it in
+``Fig/`` (PNG), then closes it. No window is opened, so the scripts run without
+a display.
 
-Figures du pipeline : sélection des périodes, comparaison signé/|C|, « 3 vues
-par méthode », balayage du seuil q, détection par pics, comparaison des périodes
-retenues, superposition λ_max/⟨λ⟩, et balayage des lags VAR.
+Pipeline figures: period selection, signed/|C| comparison, "3 views per method",
+q-threshold sweep, peak detection, comparison of the retained periods,
+λ_max/⟨λ⟩ overlay, and VAR-lag sweep.
 """
 import matplotlib
 matplotlib.use("Agg")
@@ -23,7 +23,7 @@ plt.rcParams["figure.dpi"] = 90
 
 
 def _save(fig, name):
-    """Sauve ``fig`` dans ``Fig/{name}.png`` (tight), la ferme et renvoie le chemin."""
+    """Save ``fig`` to ``Fig/{name}.png`` (tight), close it and return the path."""
     path = config.FIG_DIR / f"{name}.png"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -32,7 +32,7 @@ def _save(fig, name):
 
 
 def _med(series):
-    """Médiane par jour relatif (padding NaN à droite) d'une liste de courbes."""
+    """Median per relative day (right-padded with NaN) of a list of curves."""
     if not series:
         return np.array([])
     L = max(len(v) for v in series)
@@ -43,7 +43,7 @@ def _med(series):
 
 
 def _date_ticks(ax, all_days, n=14):
-    """Place ~``n`` étiquettes de dates à partir d'un index entier de jours."""
+    """Place ~``n`` date labels from an integer day index."""
     step = max(1, len(all_days) // n)
     ax.set_xticks(range(0, len(all_days), step))
     ax.set_xticklabels([str(all_days[k]) for k in range(0, len(all_days), step)],
@@ -51,10 +51,10 @@ def _date_ticks(ax, all_days, n=14):
     ax.set_xlim(0, len(all_days) - 1)
 
 
-# ── Étape 1/2 : sélection des périodes (cell 6) ───────────────────────────────
+# ── Step 1/2: period selection (cell 6) ───────────────────────────────────────
 def plot_period_selection(mc_all, mc_smooth, all_days, intervals_chrono,
                           selected, mean_mc, name="periodes_selection"):
-    """Série ⟨|C|⟩ + fenêtres de crise (orange) et périodes retenues (rouge)."""
+    """⟨|C|⟩ series + crisis windows (orange) and retained periods (red)."""
     sel_set = set(selected)
     fig, ax = plt.subplots(figsize=(14, 4))
     ax.plot(mc_all, color="steelblue", lw=0.7, alpha=0.5, label="<|C_ij|> journalier")
@@ -80,11 +80,11 @@ def plot_period_selection(mc_all, mc_smooth, all_days, intervals_chrono,
     return _save(fig, name)
 
 
-# ── Comparaison |C| vs signé (cell 12) ────────────────────────────────────────
+# ── |C| vs signed comparison (cell 12) ────────────────────────────────────────
 def plot_signed_comparison(mc_all, mc_smooth, intervals_chrono, crisis_map, mean_mc,
                            mc_signed, mc_signed_smooth, intervals_signed,
                            crisis_map_signed, all_days, name="periodes_signe_vs_abs"):
-    """Deux panneaux : détection sur |C_ij| (haut) et sur C_ij signé (bas)."""
+    """Two panels: detection on |C_ij| (top) and on signed C_ij (bottom)."""
     mean_mc_signed = np.nanmean(mc_signed)
     fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
     panels = [(mc_all, mc_smooth, intervals_chrono, crisis_map, mean_mc,
@@ -106,26 +106,26 @@ def plot_signed_comparison(mc_all, mc_smooth, intervals_chrono, crisis_map, mean
     return _save(fig, name)
 
 
-# ── Les 3 vues par méthode (cells 10 / 14 / 25) ───────────────────────────────
+# ── The 3 views per method (cells 10 / 14 / 25) ───────────────────────────────
 def plot_three_views(collected, name, suptitle=None, label_suffix="",
                      xlabel="jour", r2_seuil=config.R2_SEUIL):
-    """Grille 3 x len(SIS_MODELS) : évolution | scatter | distribution des R².
+    """Grid 3 x len(SIS_MODELS): trajectories | scatter | R² distribution.
 
     Parameters
     ----------
     collected : dict
-        Sortie de ``selection.collect_by_method`` : par méthode
+        Output of ``analysis.collect_by_method``: per method
         ``dict(Es, Xs, E_all, X_all, r2s)``.
     name : str
-        Nom de fichier (sans extension).
+        File name (without extension).
     suptitle : str or None
-        Titre global éventuel.
+        Optional global title.
     label_suffix : str
-        Ajouté au titre de chaque colonne (ex. ' [signe]').
+        Appended to each column title (e.g. ' [signe]').
     xlabel : str
-        Étiquette de l'axe des x du panneau du haut.
+        Label of the x-axis of the top panel.
     r2_seuil : float
-        Seuil affiché dans les titres.
+        Threshold shown in the titles.
     """
     models = config.SIS_MODELS
     fig, axes = plt.subplots(3, len(models), figsize=(5 * len(models), 11))
@@ -174,9 +174,9 @@ def plot_three_views(collected, name, suptitle=None, label_suffix="",
     return _save(fig, name)
 
 
-# ── Balayage du seuil q (cells 17 / 18 / 19) ──────────────────────────────────
+# ── q-threshold sweep (cells 17 / 18 / 19) ────────────────────────────────────
 def plot_qsweep_summary(sweep, name="qsweep_resume", r2_seuil=config.R2_SEUIL):
-    """Nb de fits / actifs distincts (R² > seuil) en fonction du quantile q."""
+    """Number of fits / distinct assets (R² > threshold) as a function of q."""
     qs = config.Q_SWEEP
     n_fits, n_assets = [], []
     for q in qs:
@@ -196,7 +196,7 @@ def plot_qsweep_summary(sweep, name="qsweep_resume", r2_seuil=config.R2_SEUIL):
 
 
 def plot_qsweep_panel(sweep, name="qsweep_panneau", r2_seuil=config.R2_SEUIL):
-    """Les « 3 vues » mais une colonne par seuil q (grille grossière Q_PANEL)."""
+    """The "3 views" but one column per q threshold (coarse Q_PANEL grid)."""
     qs = config.Q_PANEL
     fig, axes = plt.subplots(3, len(qs), figsize=(4.2 * len(qs), 11), squeeze=False)
     for j, q in enumerate(qs):
@@ -245,7 +245,7 @@ def plot_qsweep_panel(sweep, name="qsweep_panneau", r2_seuil=config.R2_SEUIL):
 
 
 def plot_qsweep_medians(sweep, name="qsweep_medianes", r2_seuil=config.R2_SEUIL):
-    """Trajectoires médianes x_i SIS pour chaque q, colorées par q (colorbar)."""
+    """Median x_i SIS trajectories for each q, coloured by q (colorbar)."""
     qs = config.Q_SWEEP
     cmap = plt.cm.viridis
     norm = plt.Normalize(qs.min(), qs.max())
@@ -275,9 +275,9 @@ def plot_qsweep_medians(sweep, name="qsweep_medianes", r2_seuil=config.R2_SEUIL)
     return _save(fig, name)
 
 
-# ── Détection par les pics (cell 21) ──────────────────────────────────────────
+# ── Peak detection (cell 21) ──────────────────────────────────────────────────
 def plot_peak_detection(mc_all, peak, all_days, name="pics_detection"):
-    """Série + sommets + largeur des pics (fenêtres de crise par pic)."""
+    """Series + summits + peak widths (per-peak crisis windows)."""
     mc_s, peaks, w_h, l_ips, r_ips = (peak["mc_s"], peak["peaks"], peak["w_h"],
                                       peak["l_ips"], peak["r_ips"])
     fig, ax = plt.subplots(figsize=(14, 4))
@@ -298,7 +298,7 @@ def plot_peak_detection(mc_all, peak, all_days, name="pics_detection"):
 
 
 def plot_peak_curves(curves, name="pics_courbes", r2_seuil=config.R2_SEUIL):
-    """Montées de pics : évolution E_i/x_i (gauche) + scatter agrégé (droite)."""
+    """Peak rises: E_i/x_i trajectories (left) + pooled scatter (right)."""
     Es, Xs, E_all, X_all = curves["Es"], curves["Xs"], curves["E_all"], curves["X_all"]
     fig, (axt, axs) = plt.subplots(1, 2, figsize=(14, 5))
     for E_i, x_traj in zip(Es, Xs):
@@ -329,16 +329,17 @@ def plot_peak_curves(curves, name="pics_courbes", r2_seuil=config.R2_SEUIL):
     return _save(fig, name)
 
 
-# ── Comparaison des périodes retenues + λ_max/⟨λ⟩ (cell 27) ────────────────────
+# ── Retained-period comparison + λ_max/⟨λ⟩ (cell 27) ──────────────────────────
 def plot_period_comparison(mc_all, mc_s, all_days, mean_mc, W_crise, W_pics,
                            diag, lam_dates, mix_periods, name="periodes_comparaison",
                            r2_seuil=config.R2_SEUIL):
-    """3 panneaux : périodes retenues sans pics | avec pics | λ_max/⟨λ⟩ + max|ρ|."""
+    """3 panels: retained periods without peaks | with peaks | λ_max/⟨λ⟩ + max|ρ|."""
     mc_dates = pd.to_datetime(all_days)
     ymax = np.nanmax(mc_s)
     fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
 
     def _panel(ax, W, color, title):
+        """Draw one ⟨|C|⟩ panel with the windows W shaded."""
         ax.plot(mc_dates, mc_all, color="steelblue", lw=0.7, alpha=0.45,
                 label="⟨|C_ij|⟩ journalier")
         ax.plot(mc_dates, mc_s, color="navy", lw=1.5, label=f"lissé ({config.SMOOTH} j)")
@@ -394,10 +395,10 @@ def plot_period_comparison(mc_all, mc_s, all_days, mean_mc, W_crise, W_pics,
     return _save(fig, name)
 
 
-# ── Superposition ⟨|C|⟩ et λ_max/⟨λ⟩ (cell 33) ────────────────────────────────
+# ── ⟨|C|⟩ and λ_max/⟨λ⟩ overlay (cell 33) ─────────────────────────────────────
 def plot_lambda_overlay(mc_all, mc_s, all_days, mean_mc, diag, lam_dates,
                         name="lambda_overlay"):
-    """⟨|C_ij|⟩ (axe gauche) et λ_max/⟨λ⟩ (axe droit) sur le même axe temps."""
+    """⟨|C_ij|⟩ (left axis) and λ_max/⟨λ⟩ (right axis) on the same time axis."""
     import pandas as pd
     mc_dates = pd.to_datetime(all_days)
     fig, ax = plt.subplots(figsize=(15, 4.5))
@@ -422,20 +423,20 @@ def plot_lambda_overlay(mc_all, mc_s, all_days, mean_mc, diag, lam_dates,
     return _save(fig, name)
 
 
-# ── Balayage des taux SIS (B, R) ──────────────────────────────────────────────
+# ── SIS-rate sweep (B, R) ──────────────────────────────────────────────────────
 def plot_br_scan(scan, B_grid, R_grid, metric="n_assets", name="br_scan"):
-    """Carte 2D (B vs R) du nb d'actifs/fits retenus, une sous-figure par méthode.
+    """2D map (B vs R) of the number of retained assets/fits, one subplot per method.
 
     Parameters
     ----------
     scan : dict
-        ``{(B, R): {methode: dict(n_fits, n_assets)}}`` (sortie de run_br_scan).
+        ``{(B, R): {method: dict(n_fits, n_assets)}}`` (output of run_br_scan).
     B_grid, R_grid : array-like
-        Valeurs de B (axe vertical) et R (axe horizontal).
+        Values of B (vertical axis) and R (horizontal axis).
     metric : {'n_assets', 'n_fits'}
-        Quantité affichée.
+        Quantity displayed.
     name : str
-        Nom de fichier.
+        File name.
     """
     Bv = [round(float(b), 2) for b in B_grid]
     Rv = [round(float(r), 2) for r in R_grid]
@@ -460,7 +461,7 @@ def plot_br_scan(scan, B_grid, R_grid, metric="n_assets", name="br_scan"):
             for j in range(len(Rv)):
                 ax.text(j, i, int(M[i, j]), ha="center", va="center",
                         color="white" if M[i, j] < (vmin + vmax) / 2 else "black", fontsize=8)
-        if 1.0 in Bv and 1.0 in Rv:                     # cadre rouge = référence B=R=1
+        if 1.0 in Bv and 1.0 in Rv:                     # red box = reference B=R=1
             ax.add_patch(Rectangle((Rv.index(1.0) - 0.5, Bv.index(1.0) - 0.5), 1, 1,
                                    fill=False, edgecolor="red", lw=2))
         bi, rj = np.unravel_index(np.argmax(M), M.shape)
@@ -470,9 +471,9 @@ def plot_br_scan(scan, B_grid, R_grid, metric="n_assets", name="br_scan"):
     return _save(fig, name)
 
 
-# ── Balayage des lags VAR (cells 35-37) ───────────────────────────────────────
+# ── VAR-lag sweep (cells 35-37) ───────────────────────────────────────────────
 def plot_lag_scan(ldf, lags, name="var_lag_scan", r2_seuil=config.R2_SEUIL):
-    """Qualité du fit SIS selon le lag VAR : nb fits R²>seuil + R² agrégé/moyen."""
+    """SIS fit quality by VAR lag: nb fits R²>threshold + aggregate/mean R²."""
     fig, ax = plt.subplots(figsize=(10, 4.5))
     ax.plot(ldf.index, ldf["n_sup"], "o-", color="#4c78a8", label=f"nb fits R²>{r2_seuil}")
     ax.set_xlabel("lag VAR (jours)")

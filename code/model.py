@@ -1,17 +1,17 @@
-"""Détection des périodes de crise — la brique « un pour les périodes ».
+"""Crisis-period detection — the "one for the periods" building block.
 
-Trois familles de périodes sont produites à partir de la corrélation moyenne
-journalière ⟨|C_ij|⟩ et des profils par actif E_i :
+Three families of periods are produced from the daily mean correlation ⟨|C_ij|⟩
+and the per-asset profiles E_i:
 
-  1. fenêtres CROISSANTES de ⟨|C|⟩          -> :func:`detect_global_windows`
-  2. montées des PICS de ⟨|C|⟩              -> :func:`detect_peaks` + :func:`peak_rises`
-  3. crise PAR ACTIF (E_i croissant)        -> :func:`compute_crisis_map` (mis en cache)
+  1. RISING windows of ⟨|C|⟩              -> :func:`detect_global_windows`
+  2. RISES to the PEAKS of ⟨|C|⟩          -> :func:`detect_peaks` + :func:`peak_rises`
+  3. PER-ASSET crisis (rising E_i)        -> :func:`compute_crisis_map` (cached)
 
-Une variante « signée » (sans valeur absolue) est fournie pour l'expérience de
-détection sans ``np.abs`` (:func:`compute_E_signed`).
+A "signed" variant (without absolute value) is provided for the detection
+experiment without ``np.abs`` (:func:`compute_E_signed`).
 
-Le diagnostic spectral λ_max/⟨λ⟩ (:func:`spectral_diagnostics`, mis en cache)
-sert de point de comparaison « mode de marché ».
+The spectral diagnostic λ_max/⟨λ⟩ (:func:`spectral_diagnostics`, cached) serves
+as a "market mode" reference point.
 """
 import numpy as np
 from scipy.ndimage import uniform_filter1d
@@ -21,30 +21,30 @@ import config
 from config import disk_cache
 
 
-# ── Outils génériques de détection ────────────────────────────────────────────
+# ── Generic detection tools ───────────────────────────────────────────────────
 def increasing_intervals(y, smooth=config.SMOOTH, min_len=config.MIN_LEN,
                          min_gain=0.0, merge_gap=config.MERGE_GAP, refine=config.REFINE):
-    """Intervalles (début, fin) où ``y`` lissé croît ; triés par gain décroissant.
+    """Intervals (start, end) where smoothed ``y`` rises; sorted by decreasing gain.
 
     Parameters
     ----------
     y : array-like
-        Série à analyser.
+        Series to analyse.
     smooth : int
-        Largeur de la moyenne glissante appliquée avant la détection.
+        Width of the moving average applied before detection.
     min_len : int
-        Longueur minimale d'un intervalle conservé.
+        Minimum length of a kept interval.
     min_gain : float
-        Gain (croissance lissée) minimal exigé sur l'intervalle.
+        Minimum (smoothed) rise required over the interval.
     merge_gap : int
-        Fusionne deux intervalles séparés par <= ``merge_gap`` points décroissants.
+        Merge two intervals separated by <= ``merge_gap`` declining points.
     refine : int
-        Demi-fenêtre d'ajustement fin des bords pour maximiser l'amplitude.
+        Half-window for fine edge adjustment maximising the amplitude.
 
     Returns
     -------
     (list of (int, int), ndarray)
-        Les intervalles triés par gain décroissant, et la série lissée ``ys``.
+        The intervals sorted by decreasing gain, and the smoothed series ``ys``.
     """
     y = np.asarray(y, float)
     ys = uniform_filter1d(y, size=smooth, mode="nearest")
@@ -80,17 +80,17 @@ def increasing_intervals(y, smooth=config.SMOOTH, min_len=config.MIN_LEN,
 
 
 def asset_runs(row):
-    """Plages contiguës ``True`` d'un booléen -> liste de (début, fin) inclusifs.
+    """Contiguous ``True`` runs of a boolean -> list of inclusive (start, end).
 
     Parameters
     ----------
     row : array-like of bool
-        Masque temporel.
+        Temporal mask.
 
     Returns
     -------
     list of (int, int)
-        Les plages contiguës de valeurs vraies.
+        The contiguous runs of true values.
     """
     runs, s = [], None
     for k, v in enumerate(row):
@@ -105,18 +105,18 @@ def asset_runs(row):
 
 def strong_rise(y, smooth=config.SR_SMOOTH, min_len=config.SR_MIN_LEN,
                 min_gain=config.SR_MIN_GAIN):
-    """Plus longue sous-fenêtre de forte montée (gain lissé >= ``min_gain``).
+    """Longest strong-rise sub-window (smoothed gain >= ``min_gain``).
 
     Parameters
     ----------
     y : array-like
-        Profil E_i sur la fenêtre de crise de l'actif.
-    smooth, min_len, min_gain : voir config.SR_*
+        E_i profile over the asset's crisis window.
+    smooth, min_len, min_gain : see config.SR_*
 
     Returns
     -------
     tuple or None
-        ``(longueur, gain, start, end)`` de la meilleure sous-fenêtre, ou None.
+        ``(length, gain, start, end)`` of the best sub-window, or None.
     """
     ys, best, m = uniform_filter1d(y, size=smooth, mode="nearest"), None, len(y)
     for s in range(m):
@@ -129,21 +129,21 @@ def strong_rise(y, smooth=config.SR_SMOOTH, min_len=config.SR_MIN_LEN,
     return best
 
 
-# ── Boucle 1 : fenêtres globales de crise ─────────────────────────────────────
+# ── Loop 1: global crisis windows ─────────────────────────────────────────────
 def detect_global_windows(mc_all, mean_mc):
-    """Fenêtres globales de crise : ⟨|C|⟩ croissant ET niveau > seuil de crise.
+    """Global crisis windows: rising ⟨|C|⟩ AND level > crisis threshold.
 
     Parameters
     ----------
     mc_all : ndarray
-        ⟨|C_ij|⟩ journalier.
+        Daily ⟨|C_ij|⟩.
     mean_mc : float
-        Moyenne globale de ⟨|C|⟩.
+        Global mean of ⟨|C|⟩.
 
     Returns
     -------
     (list of (int, int), ndarray)
-        Fenêtres en ordre chronologique, et la série lissée.
+        Windows in chronological order, and the smoothed series.
     """
     intervals_raw, mc_smooth = increasing_intervals(mc_all)
     chrono = sorted([(a, b) for a, b in intervals_raw
@@ -152,9 +152,9 @@ def detect_global_windows(mc_all, mean_mc):
     return chrono, mc_smooth
 
 
-# ── Boucle 2 : crise par actif (E_i croissant) — mise en cache ────────────────
+# ── Loop 2: per-asset crisis (rising E_i) — cached ────────────────────────────
 def _crisis_map_from(E):
-    """Carte (N x jours) des plages où chaque E_i croît au-dessus de son seuil."""
+    """Map (N x days) of the runs where each E_i rises above its own threshold."""
     N = E.shape[0]
     cm = np.zeros((N, E.shape[1]), dtype=bool)
     for i in range(N):
@@ -167,33 +167,34 @@ def _crisis_map_from(E):
 
 
 def compute_crisis_map(E_daily_all):
-    """Carte de crise par actif (|C|), mise en cache sous les paramètres de détection.
+    """Per-asset crisis map (|C|), cached under the detection parameters.
 
     Returns
     -------
-    ndarray of bool, shape (N, jours)
+    ndarray of bool, shape (N, days)
     """
     sig = (f"af{config.ASSET_FACTOR}_s{config.SMOOTH}_ml{config.MIN_LEN}"
            f"_mg{config.MERGE_GAP}_rf{config.REFINE}")
     return disk_cache("crisis_map", sig, lambda: _crisis_map_from(E_daily_all))
 
 
-# ── Variante signée (expérience « sans valeur absolue ») ──────────────────────
+# ── Signed variant (the "without absolute value" experiment) ──────────────────
 def compute_E_signed(data, N):
-    """E_i journalier SIGNÉ (somme des C_ij sans ``np.abs``), mis en cache.
+    """SIGNED daily E_i (sum of C_ij without ``np.abs``), cached.
 
     Parameters
     ----------
     data : DataFrame
-        Log-rendements (index horodaté).
+        Log-returns (timestamped index).
     N : int
-        Nombre d'actifs.
+        Number of assets.
 
     Returns
     -------
-    ndarray, shape (N, jours)
+    ndarray, shape (N, days)
     """
     def _compute():
+        """Compute the signed daily E_i table from the raw returns."""
         da = data.copy()
         da["day"] = da.index.date
         days = np.array(sorted(da["day"].unique()))
@@ -205,20 +206,20 @@ def compute_E_signed(data, N):
             with np.errstate(invalid="ignore", divide="ignore"):
                 C = np.nan_to_num(np.corrcoef(chunk.T), nan=0.0)
             np.fill_diagonal(C, 0)
-            E[:, k] = C.sum(axis=1) / (N - 1)        # SIGNÉ : pas de np.abs
+            E[:, k] = C.sum(axis=1) / (N - 1)        # SIGNED: no np.abs
         return E
 
     return disk_cache("E_daily_signed", f"N{N}T{len(data)}", _compute)
 
 
 def detect_global_windows_signed(E_signed):
-    """Fenêtres globales + carte de crise sur la corrélation SIGNÉE.
+    """Global windows + crisis map on the SIGNED correlation.
 
     Returns
     -------
     (mc_signed, mc_signed_smooth, intervals_signed, crisis_map_signed)
     """
-    mc_signed = np.nanmean(E_signed, axis=0)         # = moyenne des C_ij signés
+    mc_signed = np.nanmean(E_signed, axis=0)         # = mean of the signed C_ij
     mean_mc_signed = np.nanmean(mc_signed)
     iv_raw, mc_smooth = increasing_intervals(mc_signed)
     intervals = sorted([(a, b) for a, b in iv_raw
@@ -228,23 +229,23 @@ def detect_global_windows_signed(E_signed):
     return mc_signed, mc_smooth, intervals, crisis_map_signed
 
 
-# ── Détection par les pics de ⟨|C|⟩ ───────────────────────────────────────────
+# ── Detection from the peaks of ⟨|C|⟩ ──────────────────────────────────────────
 def detect_peaks(mc_all, mean_mc):
-    """Pics de ⟨|C|⟩ lissé et largeur de chaque pic -> intervalles de crise.
+    """Peaks of smoothed ⟨|C|⟩ and each peak's width -> crisis intervals.
 
     Parameters
     ----------
     mc_all : ndarray
-        ⟨|C_ij|⟩ journalier.
+        Daily ⟨|C_ij|⟩.
     mean_mc : float
-        Moyenne globale (sert de hauteur minimale d'un pic).
+        Global mean (used as a minimum peak height).
 
     Returns
     -------
     dict
-        ``mc_s`` (série lissée), ``peaks`` (indices des sommets),
-        ``w_h`` / ``l_ips`` / ``r_ips`` (hauteur et bornes de largeur),
-        ``peak_intervals`` (liste de (gauche, droite, sommet)).
+        ``mc_s`` (smoothed series), ``peaks`` (summit indices),
+        ``w_h`` / ``l_ips`` / ``r_ips`` (width height and bounds),
+        ``peak_intervals`` (list of (left, right, summit)).
     """
     mc_s = uniform_filter1d(np.nan_to_num(mc_all, nan=mean_mc),
                             size=config.SMOOTH, mode="nearest")
@@ -259,19 +260,19 @@ def detect_peaks(mc_all, mean_mc):
 
 
 def peak_rises(peak_intervals, mc_s):
-    """Montées des pics : du creux précédent jusqu'au sommet (>= MIN_LEN jours).
+    """Peak rises: from the preceding trough to the summit (>= MIN_LEN days).
 
     Parameters
     ----------
     peak_intervals : list of (int, int, int)
-        Sortie ``peak_intervals`` de :func:`detect_peaks`.
+        ``peak_intervals`` output of :func:`detect_peaks`.
     mc_s : ndarray
-        ⟨|C|⟩ lissé (pour localiser les creux).
+        Smoothed ⟨|C|⟩ (to locate the troughs).
 
     Returns
     -------
     list of (int, int)
-        Montées (creux -> sommet), triées et dédupliquées.
+        Rises (trough -> summit), sorted and deduplicated.
     """
     rises, prev = [], 0
     for a, b, pk in peak_intervals:
@@ -282,26 +283,27 @@ def peak_rises(peak_intervals, mc_s):
     return sorted(set(rises))
 
 
-# ── Diagnostic spectral λ_max/⟨λ⟩ (mode de marché) ────────────────────────────
+# ── Spectral diagnostic λ_max/⟨λ⟩ (market mode) ───────────────────────────────
 def spectral_diagnostics(data, N):
-    """λ_max/⟨λ⟩ et max|ρ|/⟨|ρ|⟩ en fenêtre glissante, mis en cache.
+    """λ_max/⟨λ⟩ and max|ρ|/⟨|ρ|⟩ in a sliding window, cached.
 
     Parameters
     ----------
     data : DataFrame
-        Log-rendements.
+        Log-returns.
     N : int
-        Nombre d'actifs.
+        Number of assets.
 
     Returns
     -------
     DataFrame
-        Index daté ; colonnes ``ratio_corr, ratio_eig, mean_return,
+        Dated index; columns ``ratio_corr, ratio_eig, mean_return,
         max_corr, mean_corr``.
     """
     import pandas as pd
 
     def _compute():
+        """Compute the sliding-window spectral diagnostics table."""
         a = data.values
         Tn, Nn = a.shape
         iu = np.triu_indices(Nn, k=1)
@@ -323,17 +325,17 @@ def spectral_diagnostics(data, N):
 
 
 def lambda_peaks(diag):
-    """Dates des pics de λ_max/⟨λ⟩ lissé.
+    """Dates of the peaks of smoothed λ_max/⟨λ⟩.
 
     Parameters
     ----------
     diag : DataFrame
-        Sortie de :func:`spectral_diagnostics`.
+        Output of :func:`spectral_diagnostics`.
 
     Returns
     -------
     DatetimeIndex
-        Dates des sommets de λ_max/⟨λ⟩.
+        Dates of the λ_max/⟨λ⟩ summits.
     """
     re = uniform_filter1d(diag["ratio_eig"].values, size=config.SPEC_SMOOTH, mode="nearest")
     pk, _ = find_peaks(re, prominence=config.SPEC_PROM_FACTOR * diag["ratio_eig"].std(),
@@ -342,19 +344,20 @@ def lambda_peaks(diag):
 
 
 def mix_periods(diag):
-    """Périodes « mix » : bosses du score z(λ_max/⟨λ⟩) + z(max|ρ|/⟨|ρ|⟩).
+    """"Mix" periods: bumps of the score z(λ_max/⟨λ⟩) + z(max|ρ|/⟨|ρ|⟩).
 
     Parameters
     ----------
     diag : DataFrame
-        Sortie de :func:`spectral_diagnostics`.
+        Output of :func:`spectral_diagnostics`.
 
     Returns
     -------
     list of (Timestamp, Timestamp)
-        Bornes (gauche, droite) de chaque bosse du score combiné.
+        Bounds (left, right) of each bump of the combined score.
     """
     def _z(s):
+        """Z-score of a series (NaN-aware)."""
         s = np.asarray(s, float)
         return (s - np.nanmean(s)) / np.nanstd(s)
 
@@ -367,27 +370,27 @@ def mix_periods(diag):
                    for l, r in zip(li, ri)})
 
 
-# ═══════════════════════════ Dynamique SIS (ex-sis.py) ═══════════════════════════
+# ═══════════════════════════ SIS dynamics (was sis.py) ═══════════════════════════
 
-"""Dynamique SIS — la brique « un qui résout la dynamique SIS en prenant la matrice ».
+"""SIS dynamics — the "one that solves the SIS dynamics given the matrix" block.
 
-Le modèle SIS borné
+The bounded SIS model
 
     dx_i/dt = -B x_i + R (1 - x_i) Σ_j A_ij x_j ,   x_i ∈ [0, 1]
 
-est intégré à partir d'une condition initiale x0 (profil E_i au premier jour de
-la montée), pour une matrice de contagion ``A`` quelconque (PMFG, VAR, Corr thr).
-La trajectoire x_i(t) est recadrée sur le temps de convergence T_conv vers
-l'équilibre x*, puis comparée au profil empirique E_i(t) par régression -> R².
+is integrated from an initial condition x0 (E_i profile on the first day of the
+rise), for any contagion matrix ``A`` (PMFG, VAR, Corr thr). The trajectory
+x_i(t) is reframed on the convergence time T_conv towards the equilibrium x*,
+then compared to the empirical profile E_i(t) by regression -> R².
 
-Trois intégrateurs de fidélité décroissante (tous équivalents au point fixe,
-seul le coût change) :
-  - :func:`integrate`        : double intégration, grille 5000 pts (référence)
-  - :func:`integrate_fast`   : simple intégration, grille 5000 pts (~2x plus rapide)
-  - :func:`integrate_xscan`  : tolérances relâchées, grille 400 pts (balayages)
+Three integrators of decreasing fidelity (all equivalent at the fixed point,
+only the cost differs):
+  - :func:`integrate`        : double integration, 5000-pt grid (reference)
+  - :func:`integrate_fast`   : single integration, 5000-pt grid (~2x faster)
+  - :func:`integrate_xscan`  : loosened tolerances, 400-pt grid (sweeps)
 
-`fit_periods` calcule et met en cache, pour une liste de fenêtres, les fits SIS
-de chaque méthode.
+`fit_periods` computes and caches, for a list of windows, the SIS fits of each
+method.
 """
 from types import SimpleNamespace
 
@@ -400,45 +403,45 @@ from config import disk_cache, sig_of
 
 
 def _sis_params_tag():
-    """Suffixe lisible des paramètres SIS communs aux signatures de cache."""
+    """Readable suffix of the SIS parameters shared by the cache signatures."""
     return (f"thr{config.CORR_THRESHOLD}_T{config.T_LONG}_B{config.B_FIT}"
             f"_R{config.R_FIT}_tol{config.TOL_EQ}"
             f"_sr{config.SR_SMOOTH}-{config.SR_MIN_LEN}-{config.SR_MIN_GAIN}")
 
 
 def sig_period_data(N, windows, crisis_map):
-    """Signature du cache 'period_data' (fenêtres croissantes, |C|)."""
+    """Signature of the 'period_data' cache (rising windows, |C|)."""
     return f"N{N}_p{len(windows)}_{_sis_params_tag()}_{sig_of(windows, crisis_map)}"
 
 
 def sig_period_data_signed(windows_signed, crisis_map_signed):
-    """Signature du cache 'period_data_sig' (détection signée, sans np.abs)."""
+    """Signature of the 'period_data_sig' cache (signed detection, no np.abs)."""
     return (f"SIG_p{len(windows_signed)}_{_sis_params_tag()}"
             f"_{sig_of(windows_signed, crisis_map_signed)}")
 
 
 def sig_peak_period_data(peak_rises_list, crisis_map):
-    """Signature du cache 'peak_period_data' (montées des pics)."""
+    """Signature of the 'peak_period_data' cache (peak rises)."""
     return sig_of(peak_rises_list, crisis_map, config.CORR_THRESHOLD, config.T_LONG,
                   config.B_FIT, config.R_FIT, config.TOL_EQ,
                   config.SR_SMOOTH, config.SR_MIN_LEN, config.SR_MIN_GAIN)
 
 
 def ode_sis_bounded(t, x, A, B, R):
-    """Champ de vitesse du SIS borné : état clippé dans [0, 1].
+    """Velocity field of the bounded SIS: state clipped to [0, 1].
 
-    Le clipping rend la dynamique stable même pour une condition initiale signée.
+    The clipping keeps the dynamics stable even for a signed initial condition.
 
     Parameters
     ----------
     t : float
-        Temps (ignoré, système autonome).
+        Time (ignored, autonomous system).
     x : ndarray
-        État courant.
+        Current state.
     A : ndarray, shape (N, N)
-        Matrice de contagion.
+        Contagion matrix.
     B, R : float
-        Taux de récupération et d'infection.
+        Recovery and infection rates.
 
     Returns
     -------
@@ -450,7 +453,7 @@ def ode_sis_bounded(t, x, A, B, R):
 
 
 def _solve(x0, A, t_span, t_eval=None, rtol=1e-6, atol=1e-9, B=None, R=None):
-    """Raccourci ``solve_ivp`` (LSODA) ; B / R par défaut = ceux de config."""
+    """``solve_ivp`` shortcut (LSODA); B / R default to the config values."""
     B = config.B_FIT if B is None else B
     R = config.R_FIT if R is None else R
     return solve_ivp(ode_sis_bounded, t_span, x0, args=(A, B, R),
@@ -458,26 +461,26 @@ def _solve(x0, A, t_span, t_eval=None, rtol=1e-6, atol=1e-9, B=None, R=None):
 
 
 def integrate(cache_gi, gi, A, B=None, R=None):
-    """Trajectoire x_i(t) (référence) recadrée sur le temps de convergence.
+    """Trajectory x_i(t) (reference) reframed on the convergence time.
 
-    x* est obtenu par une 1re intégration à ``T_LONG`` ; le temps de convergence
-    T_conv est le 1er instant où x_i atteint ``(1 - TOL_EQ) x*``.
+    x* is obtained by a first integration up to ``T_LONG``; the convergence time
+    T_conv is the first instant where x_i reaches ``(1 - TOL_EQ) x*``.
 
     Parameters
     ----------
     cache_gi : dict
-        Entrée ``cache[gi]`` : ``x0`` (condition initiale) et ``n_days``.
+        Entry ``cache[gi]``: ``x0`` (initial condition) and ``n_days``.
     gi : int
-        Indice global de l'actif suivi.
+        Global index of the tracked asset.
     A : ndarray, shape (N, N)
-        Matrice de contagion.
+        Contagion matrix.
     B, R : float or None
-        Taux de récupération / d'infection ; ``None`` -> valeurs de config.
+        Recovery / infection rates; ``None`` -> config values.
 
     Returns
     -------
     ndarray, shape (n_days,)
-        Trajectoire x_i recadrée et clippée dans ]0, 1[.
+        Trajectory x_i reframed and clipped to ]0, 1[.
     """
     x0, n = cache_gi["x0"], cache_gi["n_days"]
     x_eq = _solve(x0, A, (0, config.T_LONG), B=B, R=R).y[gi, -1]
@@ -490,10 +493,10 @@ def integrate(cache_gi, gi, A, B=None, R=None):
 
 
 def integrate_fast(cache_gi, gi, A, B=None, R=None):
-    """Comme :func:`integrate` mais sans la 1re intégration (x* = dernier point).
+    """Like :func:`integrate` but without the first integration (x* = last point).
 
-    Résultat identique au point fixe, ~2x plus rapide ; utilisé pour les balayages
-    (seuil q et taux B/R). ``B`` / ``R`` à ``None`` -> valeurs de config.
+    Result identical at the fixed point, ~2x faster; used for the sweeps
+    (q-threshold and B/R rates). ``B`` / ``R`` at ``None`` -> config values.
     """
     x0, n = cache_gi["x0"], cache_gi["n_days"]
     tp = np.linspace(1e-3, config.T_LONG, 5000)
@@ -506,7 +509,7 @@ def integrate_fast(cache_gi, gi, A, B=None, R=None):
 
 
 def integrate_xscan(cache_gi, gi, A, B=None, R=None):
-    """Intégrateur allégé (rtol 1e-4, grille 400 pts) pour le balayage des lags VAR."""
+    """Lightweight integrator (rtol 1e-4, 400-pt grid) for the VAR-lag sweep."""
     x0, n = cache_gi["x0"], cache_gi["n_days"]
     kw = dict(rtol=1e-4, atol=1e-7, B=B, R=R)
     x_eq = _solve(x0, A, (0, config.T_LONG), **kw).y[gi, -1]
@@ -518,23 +521,23 @@ def integrate_xscan(cache_gi, gi, A, B=None, R=None):
     return np.clip(s.y[gi], 1e-8, 1 - 1e-8)
 
 
-# ── Contexte de fit (données + carte de crise + matrices) ─────────────────────
+# ── Fit context (data + crisis map + matrices) ────────────────────────────────
 def make_fit_context(ctx, crisis_map, E_daily=None):
-    """Empaquette ce dont :func:`fits_for` a besoin (réutilisable pour le signé).
+    """Pack what :func:`fits_for` needs (reusable for the signed case).
 
     Parameters
     ----------
     ctx : SimpleNamespace
-        Sortie de ``data.build_context``.
+        Output of ``data.build_context``.
     crisis_map : ndarray of bool
-        Carte de crise par actif (|C| ou signée).
+        Per-asset crisis map (|C| or signed).
     E_daily : ndarray or None
-        Profils E_i journaliers ; ``None`` -> ``ctx.E_daily_all`` (cas |C|).
+        Daily E_i profiles; ``None`` -> ``ctx.E_daily_all`` (|C| case).
 
     Returns
     -------
     SimpleNamespace
-        Champs ``data, all_days, N, crisis_map, E_daily, A_sis``.
+        Fields ``data, all_days, N, crisis_map, E_daily, A_sis``.
     """
     return SimpleNamespace(data=ctx.data, all_days=ctx.all_days, N=ctx.N,
                            crisis_map=crisis_map,
@@ -543,22 +546,22 @@ def make_fit_context(ctx, crisis_map, E_daily=None):
 
 
 def cache_signed(pa, pb, fc):
-    """Pour chaque actif en crise sur (pa, pb) : E_i mesuré + condition initiale x0.
+    """For each in-crisis asset on (pa, pb): measured E_i + initial condition x0.
 
-    L'actif n'est retenu que s'il présente une montée forte (``strong_rise``)
-    dans sa fenêtre de crise chevauchant (pa, pb).
+    An asset is kept only if it shows a strong rise (``strong_rise``) in its
+    crisis window overlapping (pa, pb).
 
     Parameters
     ----------
     pa, pb : int
-        Bornes (indices de jours) de la période globale.
+        Bounds (day indices) of the global period.
     fc : SimpleNamespace
-        Contexte de fit (:func:`make_fit_context`).
+        Fit context (:func:`make_fit_context`).
 
     Returns
     -------
     dict
-        ``{gi: dict(E_i, x0, n_days)}`` pour les actifs retenus.
+        ``{gi: dict(E_i, x0, n_days)}`` for the kept assets.
     """
     rw = {}
     for gi in range(fc.N):
@@ -592,20 +595,20 @@ def cache_signed(pa, pb, fc):
 
 
 def fits_for(pa, pb, fc):
-    """Fits SIS de toutes les méthodes sur la période (pa, pb).
+    """SIS fits of every method on the period (pa, pb).
 
     Parameters
     ----------
     pa, pb : int
-        Bornes de la période globale.
+        Bounds of the global period.
     fc : SimpleNamespace
-        Contexte de fit.
+        Fit context.
 
     Returns
     -------
     (dict, dict)
-        ``cache`` (sortie de :func:`cache_signed`) et ``fits`` :
-        ``fits[m] = (pad, sl)`` où ``pad[gi] = (E_i, x_traj)`` et
+        ``cache`` (output of :func:`cache_signed`) and ``fits``:
+        ``fits[m] = (pad, sl)`` where ``pad[gi] = (E_i, x_traj)`` and
         ``sl[gi] = dict(slope, r2, n)``.
     """
     cache = cache_signed(pa, pb, fc)
@@ -625,18 +628,18 @@ def fits_for(pa, pb, fc):
 
 
 def fit_periods(name, sig, windows, fc):
-    """Calcule (et met en cache) ``{(pa, pb): fits_for(pa, pb)}`` sur des fenêtres.
+    """Compute (and cache) ``{(pa, pb): fits_for(pa, pb)}`` over windows.
 
     Parameters
     ----------
     name : str
-        Préfixe de cache ('period_data', 'peak_period_data', 'period_data_sig').
+        Cache prefix ('period_data', 'peak_period_data', 'period_data_sig').
     sig : str
-        Signature de cache (doit refléter fenêtres + carte de crise + params SIS).
+        Cache signature (must reflect windows + crisis map + SIS params).
     windows : list of (int, int)
-        Périodes à ajuster.
+        Periods to fit.
     fc : SimpleNamespace
-        Contexte de fit.
+        Fit context.
 
     Returns
     -------

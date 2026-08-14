@@ -1,13 +1,13 @@
-"""Chargement des données et calculs de base (mis en cache une fois pour toutes).
+"""Data loading and base computations (cached once and for all).
 
-`build_context()` est le point d'entrée commun à tous les scripts : il renvoie un
-objet portant les rendements, les tableaux journaliers (⟨|C_ij|⟩ et E_i), la
-corrélation pleine période, les quatre matrices de contagion prêtes pour le SIS,
-et les métadonnées (noms d'actifs, N, masque hors-diagonale).
+`build_context()` is the shared entry point of all scripts: it returns an object
+carrying the returns, the daily tables (⟨|C_ij|⟩ and E_i), the full-period
+correlation, the four SIS-ready contagion matrices, and the metadata (asset
+names, N, off-diagonal mask).
 
-Le bloc lourd `compute_base` (boucle journalière + PMFG + VAR) est mis en cache
-sous la signature ``N{N}T{T}`` : il ne dépend que des données, pas des
-hyperparamètres, donc il survit aux changements de réglage.
+The heavy block `compute_base` (daily loop + PMFG + VAR) is cached under the
+signature ``N{N}T{T}``: it depends only on the data, not on the hyperparameters,
+so it survives tuning changes.
 """
 from types import SimpleNamespace
 
@@ -20,21 +20,21 @@ from networks import build_filtered_corr, build_pmfg, fit_var, prepare_for_sis
 
 
 def load_data(assets, log_returns=True, sort_by_sector=True):
-    """Charge les CSV des actifs, fusionne sur la date, rendements optionnels.
+    """Load the asset CSVs, merge on the date, optional returns.
 
     Parameters
     ----------
     assets : list of str
-        Noms d'actifs (fichiers attendus : ``DATA_DIR/{nom}_filled.csv``).
+        Asset names (expected files: ``DATA_DIR/{name}_filled.csv``).
     log_returns : bool
-        Si True, convertit les prix en log-rendements.
+        If True, convert prices into log-returns.
     sort_by_sector : bool
-        Si True, réordonne les colonnes par secteur (stock_category.xlsx).
+        If True, reorder columns by sector (stock_category.xlsx).
 
     Returns
     -------
     DataFrame, shape (T, N)
-        Index = horodatage, colonnes = actifs.
+        Index = timestamp, columns = assets.
     """
     dfs = [pd.read_csv(config.DATA_DIR / f"{a}_filled.csv", parse_dates=["date"])
            for a in assets]
@@ -58,26 +58,26 @@ def load_data(assets, log_returns=True, sort_by_sector=True):
 
 
 def load_returns():
-    """Log-rendements intraday des actifs du pipeline (voir :func:`load_data`).
+    """Intraday log-returns of the pipeline assets (see :func:`load_data`).
 
     Returns
     -------
     DataFrame, shape (T, N)
-        Index = horodatage, colonnes = actifs (ordonnées par secteur puis nom).
+        Index = timestamp, columns = assets (ordered by sector then name).
     """
     return load_data(config.ASSETS, log_returns=config.LOG_RETURNS,
                      sort_by_sector=config.SORT_BY_SECTOR)
 
 
 def _compute_base(data, N, mask_off):
-    """Tableaux journaliers + réseaux pleine période (calcul lourd, mis en cache).
+    """Daily tables + full-period networks (heavy computation, cached).
 
     Returns
     -------
     dict
-        ``all_days`` (jours), ``mc_all`` (⟨|C_ij|⟩ journalier),
-        ``E_daily_all`` (N x jours, E_i journalier), ``C_full`` (|corr| pleine
-        période, diag. nulle), ``A_pmfg`` / ``A_var1`` / ``A_var13`` (réseaux).
+        ``all_days`` (days), ``mc_all`` (daily ⟨|C_ij|⟩),
+        ``E_daily_all`` (N x days, daily E_i), ``C_full`` (full-period |corr|,
+        zero diagonal), ``A_pmfg`` / ``A_var1`` / ``A_var13`` (networks).
     """
     da = data.copy()
     da["day"] = da.index.date
@@ -104,14 +104,14 @@ def _compute_base(data, N, mask_off):
 
 
 def build_sis_matrices(base, mask_off):
-    """Les quatre matrices de contagion prêtes pour le SIS (dict par méthode).
+    """The four SIS-ready contagion matrices (dict keyed by method).
 
     Parameters
     ----------
     base : dict
-        Sortie de :func:`_compute_base`.
+        Output of :func:`_compute_base`.
     mask_off : ndarray of bool
-        Masque hors-diagonale.
+        Off-diagonal mask.
 
     Returns
     -------
@@ -127,12 +127,12 @@ def build_sis_matrices(base, mask_off):
 
 
 def build_context():
-    """Charge données + base + matrices et renvoie le contexte partagé.
+    """Load data + base + matrices and return the shared context.
 
     Returns
     -------
     SimpleNamespace
-        Champs : ``data, asset_names, N, mask_off, all_days, mc_all,
+        Fields: ``data, asset_names, N, mask_off, all_days, mc_all,
         E_daily_all, C_full, A_pmfg, A_var1, A_var13, mean_mc, A_sis``.
     """
     data = load_returns()
